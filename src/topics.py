@@ -244,3 +244,28 @@ def compute_coherence_bertopic(
     return score, num_topics, outlier_frac
 
 
+def get_topic_centroid_docs(
+    topic_id: int,
+    topics: np.ndarray,
+    embeddings: np.ndarray,
+    docs: list[str] | pd.Series,
+    n_docs: int = 5,
+) -> list[str]:
+    """Return top n_docs reviews whose embeddings are closest (cosine) to topic centroid."""
+    idx = np.where(topics == topic_id)[0]
+    if len(idx) == 0:
+        return []
+    sub_emb = embeddings[idx]
+    centroid = sub_emb.mean(axis=0)
+    norm_sub = np.linalg.norm(sub_emb, axis=1)
+    norm_cent = np.linalg.norm(centroid)
+    sims = (sub_emb @ centroid) / (norm_sub * norm_cent + 1e-12)
+    top_n_sub = np.argsort(-sims)[:n_docs]
+    top_n_global = idx[top_n_sub]
+    if isinstance(docs, pd.Series):
+        return docs.iloc[top_n_global].tolist()
+    elif isinstance(docs, list):
+        return [docs[i] for i in top_n_global]
+    return [str(docs[i]) for i in top_n_global]
+
+
