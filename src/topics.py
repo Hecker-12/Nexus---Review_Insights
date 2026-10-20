@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 from bertopic import BERTopic
+from gensim.corpora import Dictionary
+from gensim.models import CoherenceModel, LdaMulticore
 from sklearn.feature_extraction.text import CountVectorizer
 
 
@@ -132,5 +134,113 @@ def fit_bertopic_v2(
     model = create_bertopic_v2(random_state=random_state)
     topics, probs = model.fit_transform(docs, embeddings)
     return model, topics, probs
+
+
+def build_gensim_dictionary(
+    texts: list[list[str]],
+    no_below: int = 10,
+    no_above: float = 0.4,
+) -> Dictionary:
+    """Build a gensim Dictionary and filter extreme terms."""
+    dictionary = Dictionary(texts)
+    dictionary.filter_extremes(no_below=no_below, no_above=no_above)
+    return dictionary
+
+
+def compute_coherence_lda(
+    model_or_path,
+    texts: list[list[str]],
+    dictionary: Dictionary,
+    coherence: str = "c_npmi",
+    processes: int = 1,
+) -> float:
+    """Compute topic coherence for an LDA model."""
+    if isinstance(model_or_path, str):
+        lda_model = LdaMulticore.load(model_or_path)
+    else:
+        lda_model = model_or_path
+
+    cm = CoherenceModel(
+        model=lda_model,
+        texts=texts,
+        dictionary=dictionary,
+        coherence=coherence,
+        processes=processes,
+    )
+    return float(cm.get_coherence())
+
+
+def get_bertopic_eval_words(
+    topic_model: BERTopic,
+    docs: list[str],
+    topics: list[int] | np.ndarray,
+    dictionary: Dictionary,
+    top_n: int = 10,
+    min_words: int = 2,
+    vectorizer: CountVectorizer | None = None,
+) -> tuple[list[list[str]], int, int]:
+    """Update topic model representation with unigram vectorizer and extract valid evaluation words.
+    
+    Returns (topic_words, scored_count, skipped_count).
+    """
+    if vectorizer is None:
+        vectorizer = CountVectorizer(stop_words="english", min_df=10)
+
+    topic_model.update_topics(docs, topics=topics, vectorizer_model=vectorizer)
+
+    dict_tokens = set(dictionary.token2id.keys())
+    bertopic_words = []
+    skipped = 0
+    all_topics = sorted(set(topics) - {-1})
+
+    for t in all_topics:
+        rep = [w for w, _ in topic_model.get_topic(t)]
+        valid = [w for w in rep if w in dict_tokens][:top_n]
+        if len(valid) >= min_words:
+            bertopic_words.append(valid)
+        else:
+            skipped += 1
+
+    return bertopic_words, len(bertopic_words), skipped
+
+
+def compute_coherence_bertopic(
+    model_or_path,
+    docs: list[str],
+    topics: list[int] | np.ndarray,
+    texts: list[list[str]],
+    dictionary: Dictionary,
+    coherence: str = "c_npmi",
+    processes: int = 1,
+    vectorizer: CountVectorizer | None = None,
+) -> tuple[float, int, float]:
+    """Compute topic coherence for a BERTopic model on freshly loaded model copy.
+    
+    Returns (coherence_score, topic_count, outlier_fraction).
+    """
+    if isinstance(model_or_path, str):
+        model = BERTopic.load(model_or_path)
+    else:
+        model = model_or_path
+
+    topic_words, scored_count, _ = get_bertopic_eval_words(
+        topic_model=model,
+        docs=docs,
+        topics=topics,
+        dictionary=dictionary,
+        vectorizer=vectorizer,
+    )
+
+    cm = CoherenceModel(
+        topics=topic_words,
+        texts=texts,
+        dictionary=dictionary,
+        coherence=coherence,
+        processes=processes,
+    )
+    score = float(cm.get_coherence())
+    num_topics = count_topics(model)
+    outlier_frac = float((np.array(topics) == -1).mean())
+    return score, num_topics, outlier_frac
 
 

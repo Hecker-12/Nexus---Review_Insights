@@ -1,0 +1,6 @@
+Method,Topics,Outliers,NPMI
+LDA (k=10),10,0.0%,0.042
+LDA (k=15),15,0.0%,0.0305
+BERTopic v1,109,45.2%,0.0983
+BERTopic v2,248,46.7%,0.0593
+BERTopic v1 (merged 29 themes),29,45.2%,0.0401
