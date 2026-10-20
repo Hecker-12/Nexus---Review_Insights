@@ -93,3 +93,44 @@ def get_topic_summary(topic_model: BERTopic, exclude_outliers: bool = True) -> p
         info = info[info["Topic"] != -1].reset_index(drop=True)
     return info
 
+
+def create_bertopic_v2(random_state: int = 42) -> BERTopic:
+    """Create BERTopic v2 model with looser clustering parameters (min_cluster_size=30, min_samples=5)."""
+    from umap import UMAP
+    from hdbscan import HDBSCAN
+
+    umap_model = UMAP(
+        n_neighbors=15,
+        n_components=5,
+        min_dist=0.0,
+        metric="cosine",
+        random_state=random_state,
+    )
+    hdbscan_model = HDBSCAN(
+        min_cluster_size=30,
+        min_samples=5,
+        metric="euclidean",
+        cluster_selection_method="eom",
+        prediction_data=True,
+    )
+    vectorizer = get_default_vectorizer()
+
+    return BERTopic(
+        umap_model=umap_model,
+        hdbscan_model=hdbscan_model,
+        vectorizer_model=vectorizer,
+        verbose=True,
+    )
+
+
+def fit_bertopic_v2(
+    docs: list[str],
+    embeddings: np.ndarray,
+    random_state: int = 42,
+) -> tuple[BERTopic, list[int], np.ndarray]:
+    """Fit BERTopic v2 model and return (topic_model, topics, probs)."""
+    model = create_bertopic_v2(random_state=random_state)
+    topics, probs = model.fit_transform(docs, embeddings)
+    return model, topics, probs
+
+
