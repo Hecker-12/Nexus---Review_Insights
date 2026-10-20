@@ -71,3 +71,25 @@ def sample_reassigned_reviews(
     ]
     sample_df["text_200"] = sample_df["text"].str.slice(0, 200)
     return sample_df[["review_id", "new_topic_id", "new_topic_name", "text_200"]]
+
+
+def merge_topics(
+    topic_model: BERTopic,
+    docs: list[str],
+    nr_topics: int = 30,
+) -> tuple[BERTopic, list[int]]:
+    """Reduce topics to a target number using agglomerative clustering.
+    
+    Mutates topic_model in-place and returns (topic_model, topics_).
+    """
+    topic_model.reduce_topics(docs, nr_topics=nr_topics)
+    return topic_model, topic_model.topics_
+
+
+def get_topic_summary(topic_model: BERTopic, exclude_outliers: bool = True) -> pd.DataFrame:
+    """Return DataFrame of topic IDs, Names, and Counts."""
+    info = topic_model.get_topic_info()[["Topic", "Name", "Count"]].copy()
+    if exclude_outliers:
+        info = info[info["Topic"] != -1].reset_index(drop=True)
+    return info
+
