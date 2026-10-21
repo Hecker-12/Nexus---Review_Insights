@@ -5,3 +5,4 @@ __pycache__/
 .venv311/
 models/
 .env
+scratch/
