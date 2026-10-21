@@ -28,3 +28,32 @@
   - `sentiment_true` contains ground truth sentiment for all 50,000 reviews.
   - `pred_ft` contains fine-tuned DistilBERT predictions for the 10,000 test reviews (and `NULL` for the remaining 40,000 reviews).
   - `pct_negative` in `themes` is calculated using `sentiment_true` across all reviews in each topic.
+
+### Highest Negative Sentiment Query
+Top 5 themes with the highest `pct_negative` (excluding `Unclustered` and themes under 100 reviews):
+
+```sql
+SELECT topic_id, label, count, pct_negative
+FROM themes
+WHERE topic_id != -1 AND count >= 100
+ORDER BY pct_negative DESC
+LIMIT 5;
+```
+
+| Topic ID | Theme Label | Review Count | Pct Negative |
+|:---:|:---|:---:|:---:|
+| **17** | Cables and TV accessories | 209 | 69.38% |
+| **18** | Baby bottles and diapers | 209 | 68.90% |
+| **9** | Computer hardware and storage | 504 | 68.45% |
+| **7** | Batteries and chargers | 772 | 63.08% |
+| **8** | Headphones and phones | 565 | 61.95% |
+
+## 4. FastAPI Backend (Phase 9)
+- **Endpoints**:
+  - `GET /sentiment`: Overall sentiment metrics plus per-theme sentiment breakdowns.
+  - `GET /themes`: List of all 29 themes plus `Unclustered` (-1).
+  - `GET /summary/{theme_id}`: Grounded summary with praises, complaints, and citations (returns 404 for unknown or uncited themes).
+  - `GET /search?q=`: Semantic vector search using `all-MiniLM-L6-v2` against `embeddings.npy` returning top 10 reviews (rejects empty `q` with HTTP 400).
+- **No `/trends` Endpoint**:
+  - The dataset contains no review timestamps or date metadata, so temporal aggregation is not possible and no `/trends` endpoint is provided.
+
