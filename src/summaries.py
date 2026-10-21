@@ -214,41 +214,75 @@ def check_faithfulness(
     theme_label: str,
     claims: list[dict],
     sampled_reviews: pd.DataFrame
-) -> list[dict]:
+) -> tuple[list[dict], list[dict], list[dict]]:
     """Perform automated faithfulness checks:
-    (1) Every cited ID exists in the sample.
-    (2) Every claim has at least one citation.
-    (3) Flag claims whose cited reviews share no content word with the claim.
+    (1) For summary paragraphs: treated as uncited-by-design (not flagged for missing citations).
+    (2) For praises and complaints: must cite at least one review ID.
+    (3) Drop any cited ID that is not in the sample (e.g. theme 2 hallucinated ID).
+    (4) Word-overlap check: flag claims whose cited reviews share no content words,
+        skipping theme 24 (Spanish) and marking them as 'not_checked'.
+
+    Returns:
+        (flags, dropped_ids_records, not_checked_records)
     """
     sample_ids = set(sampled_reviews["review_id"].astype(int))
     review_text_by_id = dict(zip(sampled_reviews["review_id"].astype(int), sampled_reviews["text"]))
 
     flags = []
+    dropped_ids_records = []
+    not_checked_records = []
+
     for claim in claims:
         c_type = claim["type"]
         c_text = claim["text"]
-        c_ids = claim["review_ids"]
+        raw_ids = claim["review_ids"]
 
+        # Drop any cited ID not in the sample
+        valid_ids = []
+        for rid in raw_ids:
+            if rid in sample_ids:
+                valid_ids.append(rid)
+            else:
+                dropped_ids_records.append({
+                    "theme_id": theme_id,
+                    "theme_label": theme_label,
+                    "claim_type": c_type,
+                    "dropped_id": rid,
+                    "claim_text": c_text
+                })
+        # Update claim's review_ids with valid sample IDs only
+        claim["review_ids"] = valid_ids
+
+        # 1. Summary overview: treated as uncited-by-design
+        if c_type == "summary":
+            continue
+
+        # 2. Praise and complaint claims
         reasons = []
 
-        # Check (2): Every claim has at least one citation
-        if len(c_ids) == 0:
+        # Check: Every claim must cite at least one review
+        if len(valid_ids) == 0:
             reasons.append("missing_citation")
 
-        # Check (1): Every cited ID exists in the sample
-        invalid_ids = [rid for rid in c_ids if rid not in sample_ids]
-        if invalid_ids:
-            reasons.append(f"hallucinated_ids: {invalid_ids}")
-
-        # Check (3): Flag claims whose cited reviews share no content word with the claim
-        valid_cited_ids = [rid for rid in c_ids if rid in sample_ids]
-        if valid_cited_ids:
-            claim_words = get_content_words(c_text)
-            cited_text = " ".join([review_text_by_id[rid] for rid in valid_cited_ids])
-            cited_words = get_content_words(cited_text)
-            overlap = claim_words & cited_words
-            if len(overlap) == 0:
-                reasons.append("no_content_word_overlap")
+        # Check: Word overlap
+        if theme_id == 24:
+            # Skip word-overlap check for Theme 24 (Spanish)
+            not_checked_records.append({
+                "theme_id": theme_id,
+                "theme_label": theme_label,
+                "claim_type": c_type,
+                "claim_text": c_text,
+                "cited_review_ids": valid_ids,
+                "status": "not_checked"
+            })
+        else:
+            if valid_ids:
+                claim_words = get_content_words(c_text)
+                cited_text = " ".join([review_text_by_id[rid] for rid in valid_ids])
+                cited_words = get_content_words(cited_text)
+                overlap = claim_words & cited_words
+                if len(overlap) == 0:
+                    reasons.append("no_content_word_overlap")
 
         if reasons:
             flags.append({
@@ -256,8 +290,8 @@ def check_faithfulness(
                 "theme_label": theme_label,
                 "claim_type": c_type,
                 "claim_text": c_text,
-                "cited_review_ids": c_ids,
+                "cited_review_ids": valid_ids,
                 "reasons": reasons
             })
 
-    return flags
+    return flags, dropped_ids_records, not_checked_records
