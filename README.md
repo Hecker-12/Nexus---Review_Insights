@@ -1,323 +1,228 @@
-# Nexus — Review Insights
+# Nexus — Customer Review Insights Engine
 
-[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3119/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.157.0-009688.svg?logo=fastapi)](https://fastapi.tiangolo.com)
-[![BERTopic](https://img.shields.io/badge/BERTopic-0.17.4-orange.svg)](https://maartengr.github.io/BERTopic/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.14.1-EE4C2C.svg?logo=pytorch)](https://pytorch.org)
-[![Tests](https://img.shields.io/badge/tests-6%20passed-brightgreen.svg)]()
-
-**Nexus** is an enterprise-grade customer review intelligence engine built on **50,000 Amazon product reviews**. It provides an end-to-end analytical pipeline: transformer-based sentiment classification, outlier-aware topic discovery and reduction to **29 core themes**, hallucination-guarded LLM grounded summaries, sub-10ms semantic vector search, relational SQLite storage, and a production-ready FastAPI REST service.
+At scale, thousands of customer reviews go unread, leaving critical product flaws, recurring failure modes, and customer delight signals buried in unstructured text. Product and customer experience teams cannot manually sift through tens of thousands of reviews to extract actionable intelligence. **Nexus** solves this problem on a dataset of **50,000 Amazon product reviews** by providing an end-to-end analytical pipeline: fine-tuned transformer sentiment classification, outlier-aware topic discovery and reduction to **29 core themes**, hallucination-guarded grounded summaries that passed automatic checks, sub-10ms semantic vector search, relational SQLite storage, and an interactive FastAPI + Streamlit dashboard.
 
 ---
 
-## Architecture Overview
+## 1. Pipeline Architecture
 
 ```mermaid
 flowchart TD
-    subgraph Data Pipeline
-        RAW[Raw 50k Reviews] --> CLEAN[Text Cleaning & Tokenization]
+    subgraph Ingestion & Preprocessing
+        RAW[50,000 Amazon Reviews] --> CLEAN[Text Cleaning & Normalization]
         CLEAN --> EMB[all-MiniLM-L6-v2 Embeddings]
     end
 
-    subgraph Sentiment Analysis
-        CLEAN --> VADER[VADER Baseline: 77.07%]
-        CLEAN --> TFIDF[TF-IDF + LogReg: 90.17%]
-        CLEAN --> BERT_ZS[DistilBERT Zero-Shot: 89.80%]
-        CLEAN --> BERT_FT[DistilBERT Fine-Tuned: 94.68%]
+    subgraph Sentiment Classification
+        CLEAN --> VADER[VADER Rule Baseline]
+        CLEAN --> TFIDF[TF-IDF + Logistic Regression]
+        CLEAN --> BERT_ZS[DistilBERT Zero-Shot]
+        CLEAN --> BERT_FT[DistilBERT Fine-Tuned]
     end
 
     subgraph Topic Discovery
-        EMB --> BERTopic_v1[BERTopic v1 Baseline\n109 Topics + Outliers 45.2%]
-        BERTopic_v1 --> MERGED[Hierarchical Merge\n29 Dashboard Themes + Unclustered]
-        MERGED --> REDUCED[Embedding Outlier Reduction\nLower Confidence]
+        EMB --> LDA[LDA Baseline k=10, 15]
+        EMB --> BERTopic_v1[BERTopic v1: 109 Topics + Outliers]
+        BERTopic_v1 --> MERGED[Hierarchical Merge: 29 Themes + Unclustered]
     end
 
     subgraph LLM Intelligence
-        MERGED --> GEMINI[Google Gemini Flash]
-        GEMINI --> LABELS[Objective Noun-Phrase Labels]
-        GEMINI --> SUMMARIES[Grounded 3-Sentence Summaries\nPraises & Complaints with Citations]
-        SUMMARIES --> FAITHFUL[Automated Faithfulness Checks\n168 Claims Evaluated]
+        MERGED --> LLM_LABEL[LLM Noun-Phrase Theme Labeling]
+        MERGED --> LLM_SUM[Grounded Theme Summaries: Praises & Complaints]
+        LLM_SUM --> AUTO_CHECK[Automated Checks: Citations & Content Overlap]
     end
 
     subgraph Storage & Serving
-        MERGED & BERT_FT & SUMMARIES --> SQLITE[(insights.db SQLite)]
-        EMB & SQLITE --> FASTAPI[FastAPI REST Backend]
-        FASTAPI --> ENDPOINTS["/sentiment\n/themes\n/summary/{id}\n/search?q="]
+        MERGED & BERT_FT & LLM_SUM --> SQLITE[(insights.db SQLite)]
+        EMB & SQLITE --> FASTAPI[FastAPI REST API: /sentiment, /themes, /summary, /search]
+        FASTAPI --> STREAMLIT[Streamlit Dashboard: Overview, Theme Explorer, Search]
     end
 ```
 
 ---
 
-## Key Capabilities
+## 2. Dataset & Limitations
 
-1. **State-of-the-Art Sentiment Classification**: Fine-tuned DistilBERT achieving **94.68% accuracy** and **0.9468 Macro F1** on the 10,000-review test split, substantially outperforming heuristic (VADER: 77.07%) and linear (TF-IDF: 90.17%) baselines.
-2. **Outlier-Aware Topic Modeling (29 Themes)**: Discovers granular topics via BERTopic (`all-MiniLM-L6-v2` + HDBSCAN), hierarchically merged into **29 dashboard-sized themes** plus an explicit `"Unclustered"` outlier baseline (`-1`). An embedding-based outlier reassignment model (`topics_v1_reduced.parquet`) is maintained separately for optional lower-confidence exploration.
-3. **Grounded LLM Summaries with Faithfulness Guardrails**: Prompts Gemini for 3-sentence executive summaries, up to 3 praises, and up to 3 complaints with bracketed review citations. Automated validation enforces:
-   - Verification that every cited ID exists in the stratified sample.
-   - Citation requirement on every praise and complaint claim.
-   - Non-empty content-word overlap between claim assertions and cited review text.
-4. **Sub-10ms Semantic Vector Search**: Embeds incoming queries via `all-MiniLM-L6-v2` loaded once at application startup, performing dot-product cosine similarity across 50,000 pre-normalized embeddings to return top-10 ranked reviews.
-5. **Robust Relational Storage (`insights.db`)**: SQLite schema indexing `reviews(topic_id)` and `reviews(review_id)`, with metadata tables for theme stats and JSON-structured grounded summaries.
+The engine analyzes **50,000 Amazon product reviews** with the following structural limitations:
+- **Binary Sentiment Only**: Reviews are categorized strictly as `positive` or `negative`. There is no neutral class to capture hedged or ambivalent reviews.
+- **No Dates (No Trends)**: The dataset contains no timestamp or date metadata. Longitudinal trend tracking, time-series aggregations, and temporal spike detection cannot be performed.
+- **Star-Derived Label Noise**: Ground truth labels derived from 1–5 star ratings introduce noise (e.g. sarcastic reviews with 5 stars or mildly critical reviews rated 1 star).
+- **Mixed Products**: Reviews span diverse product categories (electronics, media, baby products, apparel, personal care) without category partition metadata, leading to composite clusters.
 
 ---
 
-## Benchmark Results
+## 3. Results
 
-### 1. Sentiment Classification Comparison (10,000 Test Reviews)
+All metrics below are drawn directly from `results/sentiment_comparison.csv`, `results/topic_comparison.csv`, `results/notes.md`, and `results/verification_report.md`.
+
+### (a) Sentiment Classification (10,000 Test Reviews)
 
 | Model | Accuracy | Macro F1 | True Negative | False Positive | False Negative | True Positive |
 |:---|:---:|:---:|:---:|:---:|:---:|:---:|
-| **VADER (Default)** | 0.7189 | 0.7041 | 2,477 | 2,457 | 354 | 4,712 |
-| **VADER (Tuned $\theta=0.7$)** | 0.7707 | 0.7706 | 3,727 | 1,207 | 1,086 | 3,980 |
-| **TF-IDF + Logistic Regression** | 0.9017 | 0.9017 | 4,426 | 508 | 475 | 4,591 |
-| **DistilBERT (Zero-Shot)** | 0.8980 | 0.8980 | 4,506 | 428 | 592 | 4,474 |
-| **DistilBERT (Fine-Tuned)** | **0.9468** | **0.9468** | **4,661** | **273** | **259** | **4,807** |
+| **VADER default** | 0.7189 | 0.7041 | 2,477 | 2,457 | 354 | 4,712 |
+| **VADER tuned (0.7)** | 0.7707 | 0.7706 | 3,727 | 1,207 | 1,086 | 3,980 |
+| **TF-IDF + LogReg** | 0.9017 | 0.9017 | 4,426 | 508 | 475 | 4,591 |
+| **DistilBERT zero-shot** | 0.8980 | 0.8980 | 4,506 | 428 | 592 | 4,474 |
+| **DistilBERT fine-tuned** | **0.9468** | **0.9468** | **4,661** | **273** | **259** | **4,807** |
 
-### 2. Topic Modeling Coherence (NPMI)
+### (b) Topic Modeling & NPMI Coherence
 
-| Method | Topic Count | Outlier % | NPMI Coherence |
+| Method | Topics | Outliers | NPMI |
 |:---|:---:|:---:|:---:|
-| **LDA ($k=10$)** | 10 | 0.0% | 0.0420 |
-| **LDA ($k=15$)** | 15 | 0.0% | 0.0305 |
-| **BERTopic v1 (Baseline)** | 109 | 45.2% | **0.0983** |
-| **BERTopic v2 (Loose)** | 248 | 46.7% | 0.0593 |
-| **BERTopic v1 (Merged 29 Themes)** | 29 | 45.2% | 0.0401 |
+| **LDA (k=10)** | 10 | 0.0% | 0.0420 |
+| **LDA (k=15)** | 15 | 0.0% | 0.0305 |
+| **BERTopic v1** | 109 | 45.2% | 0.0983 |
+| **BERTopic v2** | 248 | 46.7% | 0.0593 |
+| **BERTopic v1 (merged 29 themes)** | 29 | 45.2% | 0.0401 |
 
-> **Methodological Note on Coherence**: *Coherence depends on topic count and outlier handling; BERTopic NPMI is computed on clustered topics only, excluding the outlier group.*
+> **Note on NPMI**: *Coherence depends on topic count and outlier handling; BERTopic NPMI is computed on clustered topics only, excluding the outlier group.*
 
-### 3. Top 5 Themes with Highest Negative Sentiment
+### (c) Summary & Claim Evaluation
 
-Query executed on `data/processed/insights.db` (excluding `Unclustered` and themes with $<100$ reviews):
-
-```sql
-SELECT topic_id, label, count, pct_negative
-FROM themes
-WHERE topic_id != -1 AND count >= 100
-ORDER BY pct_negative DESC
-LIMIT 5;
-```
-
-| Topic ID | Theme Label | Total Reviews | Negative % |
-|:---:|:---|:---:|:---:|
-| **17** | Cables and TV accessories | 209 | **69.38%** |
-| **18** | Baby bottles and diapers | 209 | **68.90%** |
-| **9** | Computer hardware and storage | 504 | **68.45%** |
-| **7** | Batteries and chargers | 772 | **63.08%** |
-| **8** | Headphones and phones | 565 | **61.95%** |
-
-### 4. Faithfulness Verification Statistics
-
-Automated verification was executed across all 29 themes:
-- **Praise & Complaint Claims Evaluated**: 168
-- **Overview Summaries**: 29 (treated as *uncited-by-design* and tracked separately)
-- **Claims Skipped for Word Overlap**: 6 (Theme 24: Spanish-language reviews)
-- **Hallucinated Citations Dropped**: 1 (Review ID `2706` in Theme 2 was an out-of-sample citation)
-- **Flagged Claims**: 2 (word-overlap false alarms in Theme 14 and Theme 28)
+| Metric | Count | Details / Methodological Status |
+|:---|:---:|:---|
+| **Total claims evaluated** | 168 | Across all 29 themes |
+| **Claims not checked** | 6 | Theme 24 (Spanish-language reviews, skipped for English word-overlap) |
+| **Out-of-sample citations dropped** | 1 | Review ID `2706` in Theme 2 |
+| **Flagged claims (automatic checks)** | 2 | Word-overlap false alarms in Theme 14 and Theme 28 (passed automatic checks upon review) |
+| **Claims read by an LLM reviewer** | 18 | 14 supported, 4 partly supported, 0 unsupported |
+| **Overview summaries** | 29 | Uncited by design, reported separately from praise and complaint claims |
 
 ---
 
-## 29 Final Product Themes
+## 4. Key Findings
 
-| ID | Theme Label | ID | Theme Label |
-|:---:|:---|:---:|:---|
-| **-1** | Unclustered *(Outlier group)* | **14** | Exercise and dance DVDs |
-| **0** | Books | **15** | Cameras and lenses |
-| **1** | Movies and DVDs | **16** | Watches and jewelry |
-| **2** | Music CDs and albums | **17** | Cables and TV accessories |
-| **3** | Toys and gifts | **18** | Baby bottles and diapers |
-| **4** | Coffee makers | **19** | Bedding and pillows |
-| **5** | Supplements, food and personal care | **20** | Mixed: Gun cases and backpacks |
-| **6** | Video games | **21** | Keyboards and mice |
-| **7** | Batteries and chargers | **22** | Lights and LED headlamps |
-| **8** | Headphones and phones | **23** | Magazine subscriptions |
-| **9** | Computer hardware and storage | **24** | Spanish-language reviews |
-| **10** | Dog training products | **25** | Baby car seats |
-| **11** | Knives and cutting tools | **26** | GPS navigation devices |
-| **12** | Shoes and boots | **27** | Thermometers and humidity gauges |
-| **13** | Filters, pumps and cleaners | **28** | Fans |
+1. **Fine-Tuning Gain**: Fine-tuning DistilBERT yielded **94.68% accuracy** and **0.9468 Macro F1**, outperforming the zero-shot baseline (89.80%) by **+4.88%** and cutting false positives from 428 to 273.
+2. **Domain Shift & Linear Baseline**: TF-IDF + Logistic Regression achieved **90.17% accuracy**, proving to be a remarkably strong baseline on in-domain Amazon review vocabulary compared to tuned VADER (77.07%).
+3. **Coherence vs Human Judgment**: While BERTopic v1 achieved higher NPMI (0.0983) with 109 micro-clusters, 109 topics is overwhelming for decision-makers. Hierarchically merging to 29 themes (NPMI 0.0401) created human-interpretable product themes.
+4. **Outlier Reassignment Noise**: Reassigning the 45.2% HDBSCAN outliers via cosine similarity introduced noise; spot-checks revealed clear thematic alignment in only 4 of 8 examined cases.
+5. **LLM Labels Needing Correction**: Raw cluster labels required manual refinement: 22 of 29 labels were adjusted, with about 10 fixing real miscategorizations where raw keywords were overly generic or skewed by dominant words.
+6. **Themes with Highest Negative Sentiment**: Querying `insights.db` for themes with $\ge 100$ reviews (excluding Unclustered) identified the top 5 pain points:
+   - **Cables and TV accessories** (Theme 17): **69.38% negative** (209 reviews)
+   - **Baby bottles and diapers** (Theme 18): **68.90% negative** (209 reviews)
+   - **Computer hardware and storage** (Theme 9): **68.45% negative** (504 reviews)
+   - **Batteries and chargers** (Theme 7): **63.08% negative** (772 reviews)
+   - **Headphones and phones** (Theme 8): **61.95% negative** (565 reviews)
 
 ---
 
-## Repository Structure
+## 5. Error Analysis
 
-```
-review-insights/
-├── README.md                           # Project overview, benchmarks, API docs
-├── requirements.txt                    # Pinned production dependencies
-├── results/
-│   ├── notes.md                        # Methodological notes and SQL queries
-│   ├── sentiment_comparison.csv        # Sentiment benchmark table
-│   ├── sentiment_comparison.png        # Confusion matrices and ROC curves
-│   └── topic_comparison.csv            # NPMI topic coherence table
-├── src/
-│   ├── api/
-│   │   ├── __init__.py
-│   │   └── main.py                     # FastAPI application & lifespan setup
-│   ├── cleaning.py                     # Data cleaning & tokenization routines
-│   ├── db.py                           # SQLite schema & database build pipeline
-│   ├── llm.py                          # Gemini client, caching, rate limiting
-│   ├── sentiment.py                    # VADER & Transformer evaluation
-│   ├── summaries.py                    # Stratified review sampling & checks
-│   └── topics.py                       # BERTopic modeling & coherence
-├── tests/
-│   ├── conftest.py                     # Pytest fixtures & path setup
-│   └── test_api.py                     # Comprehensive API test suite
-├── notebooks/                          # Exploratory analysis notebooks (01–08)
-└── data/                               # Data artifacts (tracked/local)
-    └── processed/
-        ├── insights.db                 # Production SQLite database
-        ├── embeddings.npy              # 50,000 x 384 review embeddings
-        ├── theme_labels_final.json     # Final 29 curated theme labels
-        ├── theme_summaries.json        # Grounded summaries & citations
-        └── summary_flags.json          # Automated faithfulness flags
-```
+In error analysis across the 10,000-review test split:
+- **Both Models Wrong**: 12 of 15 examined reviews where both TF-IDF and fine-tuned DistilBERT failed were determined by an LLM reviewer to be mislabeled in the ground truth or genuinely unresolvable due to conflicting sentiment.
+  - *Example (Review 16741)*: Sarcastic review rating 5 stars ("The only thing it gave me was stage 4 metastatic cancer. Overall 5 stars..."), true label `positive`, predicted `negative` by both models.
+- **Fine-Tuned Model Failure Modes**: The fine-tuned transformer struggled on:
+  1. *Hedged Sentiment*: Reviews containing both strong praise and severe criticism in different paragraphs (e.g. "great pots, lousy lids").
+  2. *Non-English Reviews*: French reviews (e.g. Review 17881 "PAS DE VERSION STF: MALGRE VOS INDICATIONS...") misclassified due to English training distribution.
 
 ---
 
-## REST API Specification
+## 6. Topic Quality Assessment
 
-### Base URL: `http://localhost:8000`
-
-Interactive OpenAPI documentation is available at `http://localhost:8000/docs`.
-
-### Endpoints
-
-| Method | Endpoint | Description | Query Parameters | Status Codes |
-|:---:|:---|:---|:---|:---:|
-| `GET` | `/sentiment` | Overall & per-theme sentiment distribution | None | `200` |
-| `GET` | `/themes` | List all 29 themes plus Unclustered (`-1`) | None | `200` |
-| `GET` | `/summary/{theme_id}` | Grounded summary, praises, complaints, citations | Path: `theme_id` (int) | `200`, `404` |
-| `GET` | `/search` | Semantic review vector search (top 10) | `q` (string, required) | `200`, `400` |
-
-> **Temporal Endpoints**: No `/trends` endpoint is implemented because the Amazon review dataset lacks timestamp/date metadata.
+Spot-checks conducted across merged themes revealed clear distinctions in topic coherence:
+- **Coherent Themes (LLM-reviewed)**:
+  - **Theme 0 (Books, 9,231 reviews)**: Highly cohesive book reviews citing reading experience, authors, and writing style.
+  - **Theme 13 (Filters, pumps and cleaners, 344 reviews)**: Consistently groups water filters, vacuum cleaners, and humidifiers around mechanical durability.
+- **Mixed Themes (LLM-reviewed)**:
+  - **Theme 5 (Supplements, food and personal care, 907 reviews)**: Blends protein powders, herbal supplements (Kava Kava), and hair color kits.
+  - **Theme 20 (Mixed: Gun cases and backpacks, 159 reviews)**: Blends rifle slings/holsters with laptop backpacks and camera cases.
+  - **Theme 28 (Fans, 58 reviews)**: Blends room circulation fans, car fans, ceiling fans, and exhaust components.
 
 ---
 
-### Example API Requests
+## 7. Dashboard Screenshots
 
-#### 1. Retrieve Overall & Per-Theme Sentiment
-```bash
-curl -X GET "http://localhost:8000/sentiment"
-```
-```json
-{
-  "overall": {
-    "total_reviews": 50000,
-    "positive_count": 26868,
-    "negative_count": 23132,
-    "pct_negative": 46.26
-  },
-  "themes": [
-    {
-      "topic_id": -1,
-      "label": "Unclustered",
-      "count": 22623,
-      "positive_count": 11885,
-      "negative_count": 10738,
-      "pct_negative": 47.46
-    },
-    {
-      "topic_id": 4,
-      "label": "Coffee makers",
-      "count": 1193,
-      "positive_count": 510,
-      "negative_count": 683,
-      "pct_negative": 57.25
-    }
-  ]
-}
-```
+The interactive dashboard consists of three tabs and contextual safety banners:
 
-#### 2. Get Grounded Summary for Theme 4
-```bash
-curl -X GET "http://localhost:8000/summary/4"
-```
-```json
-{
-  "theme_id": 4,
-  "theme_label": "Coffee makers",
-  "summary": {
-    "text": "Reviews for coffee makers show a mix of strong satisfaction and severe frustration regarding durability, design, and performance...",
-    "review_ids": [1369, 2209, 9023, 13320, 21962, 14332, 25154]
-  },
-  "praises": [
-    {
-      "text": "Brewing coffee quickly and making it almost too hot to drink immediately.",
-      "review_ids": [1369]
-    }
-  ],
-  "complaints": [
-    {
-      "text": "Severe leaking issues caused by poor internal design and cheap glue coming unglued.",
-      "review_ids": [13320]
-    }
-  ]
-}
-```
+| Overview Tab | Theme Explorer Tab |
+|:---:|:---:|
+| ![Overview Tab](results/screenshots/01_overview.png) | ![Theme Explorer](results/screenshots/02_theme_explorer.png) |
+| *Metrics, unclustered notice, and % negative bar chart* | *Selected theme metrics, grounded summary, praises & complaints* |
 
-#### 3. Semantic Vector Search
-```bash
-curl -X GET "http://localhost:8000/search?q=coffee+maker+leaking+water"
-```
-```json
-[
-  {
-    "review_id": 13320,
-    "text": "Do not buy Mr. Coffee: I am now on the 2nd ISX43 coffee maker in less than 6 months...",
-    "sentiment_true": "negative",
-    "topic_id": 4,
-    "topic_label": "Coffee makers",
-    "similarity_score": 0.7412
-  }
-]
-```
+| Mixed-Theme Caution Banner | Semantic Search Results |
+|:---:|:---:|
+| ![Mixed Theme Warning](results/screenshots/03_mixed_theme_warning.png) | ![Search Results](results/screenshots/04_search_results.png) |
+| *Caution for composite themes (5, 20, 28)* | *Top 10 cosine-similarity results for "coffee maker leaking"* |
 
 ---
 
-## Getting Started
+## 8. How to Run
 
-### Prerequisites
-- Python 3.11.x (Strictly Python 3.11 for ML & BERTopic binary compatibility)
-- Git
+### (a) Local Environment Setup
 
-### 1. Clone & Set Up Environment
+Requires Python 3.11:
 
 ```bash
+# Clone and enter directory
 git clone https://github.com/Hecker-12/Nexus---Review_Insights.git
 cd Nexus---Review_Insights
 
-# Create and activate Python 3.11 virtual environment
+# Create and activate virtual environment
 python -m venv .venv311
-# Windows PowerShell:
-.venv311\Scripts\Activate.ps1
+# Windows:
+.venv311\Scripts\activate
 # Linux/macOS:
 source .venv311/bin/activate
 
-# Install pinned dependencies
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-### 2. Run the FastAPI Backend
+### (b) Data Regeneration Order
+
+Note: `data/` and `models/` are excluded from version control. To regenerate all processed artifacts:
+1. `notebooks/01_cleaning.ipynb` — Clean and tokenize raw reviews to `data/processed/reviews_clean.parquet`.
+2. `notebooks/02_sentiment.ipynb` & `03_distilbert_ft.ipynb` — Evaluate baselines and fine-tune DistilBERT, outputting `data/processed/test_preds.parquet`.
+3. `notebooks/04_embeddings.ipynb` — Generate 384-dim unit-normalized `all-MiniLM-L6-v2` embeddings (`data/processed/embeddings.npy`).
+4. `notebooks/05_lda.ipynb` & `06_bertopic.ipynb` — Train LDA baselines and BERTopic v1/v2 models.
+5. `notebooks/08_bertopic.ipynb` — Execute hierarchical reduction to 29 themes (`data/processed/topics_v1_merged.parquet`).
+6. `src/summaries.py` — Generate grounded summaries via Gemini, enforce automated validation checks, and save `data/processed/theme_summaries.json`.
+7. `src/db.py` — Populate relational tables in `data/processed/insights.db`.
+
+> **Environment Variables**: Set `${GEMINI_API_KEY}` and optionally `LLM_MODEL=gemini-1.5-flash` in `.env` before running LLM generation scripts.
+
+### (c) Running API & Dashboard
 
 ```bash
-uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+# Terminal 1: Start FastAPI REST Backend
+uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --reload
+
+# Terminal 2: Start Streamlit Dashboard
+streamlit run app/dashboard.py
 ```
 
-The server loads `SentenceTransformer("all-MiniLM-L6-v2")` and `embeddings.npy` once on startup and begins listening at `http://localhost:8000`.
+Access the dashboard at `http://localhost:8501` and interactive Swagger docs at `http://localhost:8000/docs`.
 
-### 3. Run the Test Suite
+### (d) Running with Docker Compose
 
 ```bash
-pytest tests/ -v
+docker compose up --build
 ```
-
-All 6 test cases (`test_sentiment_endpoint`, `test_themes_endpoint`, `test_summary_valid_endpoint`, `test_summary_404_cases`, `test_search_valid`, `test_search_empty_query_cases`) validate response schema conformity, error handling, and vector retrieval.
+This builds and starts:
+- `api` on `http://localhost:8000` (mounting `./data/processed` read-only)
+- `dashboard` on `http://localhost:8501` (communicating over `http://api:8000`)
 
 ---
 
-## Methodological Notes & Standards
+## 9. Limitations & Future Roadmap
 
-- **Topic Metric Counting**: In BERTopic v1, official topic count is 109 (IDs 0–108) with 45.2% outliers. All topic counts are measured strictly using `len([t for t in model.get_topics() if t != -1])`.
-- **Outlier Policy**: The dashboard baseline retains an explicit `"Unclustered"` group using the original cluster assignments (`topics_v1.parquet` / `topics_v1_merged.parquet`). An embedding-reduced assignment (`topics_v1_reduced.parquet`) is kept as an optional toggle labeled *"lower confidence"*.
-- **LLM Prompt Caching**: All LLM calls are routed through `src/llm.py` with SHA-256 prompt hashing in `data/processed/llm_cache.json`, preventing redundant token consumption during evaluation reruns.
-- **Summary Citation Rule**: Overview paragraphs are uncited by design to offer narrative readability; claim-level citations are strictly enforced and verified on individual praise and complaint bullet points.
+### Known Limitations
+1. **Binary Classification**: Neutral or mixed customer sentiment is forced into binary buckets.
+2. **Missing Dates**: The dataset lacks timestamp attributes, precluding velocity, trend, or seasonality tracking.
+3. **45.2% Unclustered Reviews**: HDBSCAN leaves 22,623 reviews in topic `-1` to preserve cluster purity.
+4. **Weakly Supervised Star Labels**: Ground truth labels carry natural reviewer bias and sarcasm.
+
+### If I Had 2 More Weeks
+- **Negative-Only Topic Modeling**: Cluster and summarize exclusively negative reviews to build dedicated failure mode taxonomies.
+- **UMAP & HDBSCAN Optimization**: Experiment with soft clustering and density grid search to reduce the 45.2% outlier rate without collapsing cohesive clusters.
+- **Neutral Class Addition**: Introduce a 3-class sentiment model (`negative`, `neutral`, `positive`) to properly capture hedged reviews.
+- **Dated Dataset Integration**: Replace or augment with a timestamped Amazon product dataset to build time-series anomaly detection.
+- **Human Groundedness Labeling**: Conduct human verification alongside automated and LLM reviews.
+
+---
+
+## 10. Methods & Transparency Note
+
+- **LLM Used**: Grounded summaries were generated using `gemini-1.5-flash` (via the Gemini free tier) with temperature $0.2$, structured JSON schema enforcement, and stratified sample prompts.
+- **LLM Reviewer**: Claim and topic quality reviews designated as "LLM reviewer" were conducted via automated Gemini evaluation prompts and have not been validated by a human.
+- TODO(me): Conduct manual human review of sampled claims, misclassified reviews, and topic coherence.

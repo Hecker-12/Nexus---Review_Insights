@@ -1,0 +1,19 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install pinned Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy dashboard application
+COPY app/ /app/app/
+
+# Read API_BASE_URL from environment
+ENV API_BASE_URL=http://api:8000
+
+# Expose Streamlit port
+EXPOSE 8501
+
+# Run Streamlit dashboard
+CMD ["streamlit", "run", "app/dashboard.py", "--server.port=8501", "--server.address=0.0.0.0"]

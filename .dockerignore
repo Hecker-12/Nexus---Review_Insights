@@ -1,0 +1,13 @@
+data/
+models/
+.venv/
+.venv311/
+scratch/
+notebooks/
+tests/
+results/
+__pycache__/
+*.pyc
+.git/
+.env
+.ipynb_checkpoints/
