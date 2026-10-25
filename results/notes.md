@@ -57,3 +57,22 @@ LIMIT 5;
 - **No `/trends` Endpoint**:
   - The dataset contains no review timestamps or date metadata, so temporal aggregation is not possible and no `/trends` endpoint is provided.
 
+## 5. Streamlit Dashboard (Phase 10)
+- **Location**: `app/dashboard.py`
+- **Architecture**: Consumes FastAPI endpoints over HTTP (no direct database access). API base URL is read from `API_BASE_URL` environment variable, defaulting to `http://127.0.0.1:8000`.
+- **Launch Commands**:
+  ```bash
+  # Terminal 1: Start the FastAPI backend
+  uvicorn src.api.main:app --reload
+
+  # Terminal 2: Start the Streamlit dashboard
+  streamlit run app/dashboard.py
+  ```
+- **Tabs**:
+  1. **📈 Overview**: Total reviews (50,000), positive/negative counts, % negative metric cards. Horizontal bar chart of `pct_negative` per theme sorted descending (Unclustered excluded by default, toggleable via checkbox). Expandable full theme sentiment table. Info note: *"45% of reviews are unclustered; themes cover the rest."*
+  2. **🔍 Theme Explorer**: Dropdown to select any theme. Metric cards for label, review count, % negative. Grounded summary with praises and complaints, each showing cited review IDs. Caution banner on themes 5, 20, and 28: *"Mixed theme: summary may blend product types."*
+  3. **🔎 Search**: Free-text semantic search box. Top 10 results displayed with sentiment emoji (🟢/🔴), review ID, theme label, similarity score, and full review text.
+- **Caching**: All API calls cached with `st.cache_data` (5-minute TTL for themes/sentiment, 1-minute TTL for search).
+- **Error Handling**: API-down errors caught and displayed as a clear user-facing message with instructions, not a Python traceback.
+- **Dependencies Added**: `streamlit==1.66.1`, `requests==2.34.2` (pinned in `requirements.txt`).
+
