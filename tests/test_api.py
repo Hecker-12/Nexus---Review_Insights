@@ -108,6 +108,29 @@ def test_search_valid(client):
     assert scores == sorted(scores, reverse=True)
 
 
+def test_search_returns_exactly_10_sorted_descending(client):
+    """Test that search returns exactly 10 results with strictly descending similarity scores."""
+    response = client.get("/search?q=battery+died+quickly")
+    assert response.status_code == 200
+    results = response.json()
+
+    # Exactly 10 results
+    assert len(results) == 10, f"Expected 10 results, got {len(results)}"
+
+    # Each result has a similarity_score
+    scores = [r["similarity_score"] for r in results]
+    assert all(isinstance(s, float) for s in scores)
+
+    # Strictly descending order (no ties at same rank)
+    for i in range(len(scores) - 1):
+        assert scores[i] >= scores[i + 1], (
+            f"Score at index {i} ({scores[i]}) is not >= score at index {i+1} ({scores[i+1]})"
+        )
+
+    # Overall: sorted descending
+    assert scores == sorted(scores, reverse=True)
+
+
 def test_search_empty_query_cases(client):
     """Test GET /search rejects empty or whitespace-only queries with HTTP 400."""
     # Empty query parameter
