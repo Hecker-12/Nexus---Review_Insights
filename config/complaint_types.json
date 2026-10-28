@@ -1,0 +1,82 @@
+{
+  "Stopped working or defective": [
+    "It stopped working after two weeks.",
+    "The device suddenly quit working and will not turn back on.",
+    "It was completely dead on arrival and defective right out of the box.",
+    "Stopped functioning completely after only a few uses.",
+    "The motor died and it does not work anymore.",
+    "The unit failed completely and is totally nonfunctional."
+  ],
+  "Poor quality or broke easily": [
+    "The build quality is very cheap and flimsy.",
+    "It broke into pieces on the very first day of use.",
+    "The plastic cracked and snapped easily under normal pressure.",
+    "Materials feel extremely cheap and poorly made.",
+    "The handle fell off and the stitching tore apart.",
+    "Fell apart after light use and could not withstand normal wear."
+  ],
+  "Delivery problem: late, never arrived, damaged in shipping": [
+    "The package arrived two weeks late past the promised delivery date.",
+    "I never received the package and it never showed up.",
+    "The shipping box was crushed and the item arrived damaged.",
+    "Delivery took forever and was delayed multiple times.",
+    "The package was lost in transit and never delivered to my address.",
+    "The item was smashed in shipping due to terrible packaging."
+  ],
+  "Wrong item or not as described or pictured": [
+    "The item received looks completely different from the website picture.",
+    "They sent the wrong item and not what I actually ordered.",
+    "The color and design do not match the photos or description.",
+    "The product description is misleading and inaccurate.",
+    "The item in the box was totally different from what was advertised.",
+    "Not as pictured at all, false advertising on the product page."
+  ],
+  "Poor fit or wrong size": [
+    "The sizing is completely wrong and runs way too small.",
+    "It does not fit properly and is far too large and loose.",
+    "The measurements provided in the size chart are totally inaccurate.",
+    "The fit is terribly awkward, uncomfortable, and tight.",
+    "It does not fit the vehicle or device as specified in the description.",
+    "Ordered my usual size but could not even put it on because it fits so poorly."
+  ],
+  "Leaks or spills": [
+    "The bottle leaks everywhere when tilted or turned upside down.",
+    "Water spilled all over my counter and created a huge mess.",
+    "The seal is defective and liquid drips constantly from the lid.",
+    "It leaked out all the contents during regular everyday use.",
+    "The container does not hold liquid properly and seeps through the bottom.",
+    "Fluid leaked through the gaskets and caused moisture damage."
+  ],
+  "Too loud or noisy": [
+    "The unit makes an extremely loud rattling and buzzing noise.",
+    "The motor is unbearably loud even on the lowest speed setting.",
+    "There is a constant annoying high-pitched screech and hum.",
+    "It produces a terrible screeching sound that gives me a headache.",
+    "Much too noisy to use in an office or bedroom setting.",
+    "The fan makes a deafening racket whenever it turns on."
+  ],
+  "Hard to install, set up, or not compatible": [
+    "The instructions are terrible, confusing, and impossible to follow.",
+    "Very difficult and frustrating to assemble and install properly.",
+    "The software and drivers are not compatible with my operating system.",
+    "It will not connect or pair with my computer or hardware.",
+    "Setup took hours of troubleshooting and still would not configure.",
+    "Incompatible with standard fittings and mounting brackets."
+  ],
+  "Poor customer service, refund or return problems": [
+    "Customer service was completely unhelpful and refused to assist me.",
+    "I requested a refund but never received my money back from the seller.",
+    "The return process is an absolute nightmare with hidden fees.",
+    "Support never answered my emails or phone calls regarding the issue.",
+    "The warranty was not honored and they refused to replace the item.",
+    "Rude customer support representatives who refused to solve my problem."
+  ],
+  "Taste, smell or unpleasant reaction": [
+    "It has a terrible chemical smell and awful artificial odor.",
+    "The flavor tastes completely disgusting, bitter, and rancid.",
+    "Gave me a severe allergic reaction and broke out my skin in a rash.",
+    "It burned and irritated my face after applying only a tiny amount.",
+    "The foul plastic smell lingered for weeks and caused nausea.",
+    "Tastes expired, stale, and completely inedible."
+  ]
+}
