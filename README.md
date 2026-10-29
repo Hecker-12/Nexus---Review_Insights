@@ -236,7 +236,7 @@ Access the dashboard at `http://localhost:8501` and interactive Swagger docs at 
 ```bash
 docker compose up
 ```
-*Note: Docker files provided; build and run not re-tested at submission time.*
+*Note: Tested at submission time using images built earlier: docker compose up -d --no-build started both containers; GET /sentiment and GET /search returned 200 and the Streamlit page responded with 200 (page shell only). The images were not rebuilt and do not include the Drop-your-data feature.*
 
 ---
 
@@ -263,17 +263,17 @@ docker compose up
 
 | Component / Task | Automatic Checks | LLM Reviewer | Human (me) |
 |:---|:---|:---|:---|
-| **Sentiment Model Evaluation** | Accuracy, macro F1, confusion matrices on the held-out 10,000-review test set | Error samples | TODO(me) |
-| **Grounded Summaries** | Citation parsing (1 out-of-sample ID dropped), word overlap (2 flagged, both false alarms), 6 not checked | 18 claims (14 supported, 4 partly, 0 unsupported) | TODO(me) |
+| **Sentiment Model Evaluation** | Accuracy, macro F1, confusion matrices on the held-out 10,000-review test set | Error samples | Not done |
+| **Grounded Summaries** | Citation parsing (1 out-of-sample ID dropped), word overlap (2 flagged, both false alarms), 6 not checked | 18 claims (14 supported, 4 partly, 0 unsupported) | Not done |
 | **Theme Labels** | None | Gemini drafted labels, Claude suggested corrections (22 of 29 changed, about 10 fixing real errors), I approved them | Approval only |
-| **Topic Quality** | None | Spot-check of 5 themes | TODO(me) |
-| **Complaint Taxonomy** | Thresholds | About 10 reviews per type | TODO(me) |
-| **API Endpoints** | 7 passing tests (tests/test_api.py) | None | TODO(me) |
+| **Topic Quality** | None | Spot-check of 5 themes | Not done |
+| **Complaint Taxonomy** | Thresholds | About 10 reviews per type | Not done |
+| **API Endpoints** | 7 passing tests (tests/test_api.py) | None | Not done |
 
 ---
 
 ## 12. Methods & Transparency Note
 
-- **LLM Used**: Grounded summaries were generated using `gemini-2.5-flash-lite` (via the Gemini API, temperature `0.0`), structured JSON schema enforcement, and stratified sample prompts.
+- **LLM Used**: Grounded summaries were generated using a Gemini Flash-Lite model (exact version not recorded; current setting: gemini-2.5-flash-lite), temperature 0.0, and stratified sample prompts.
 - **LLM Reviewer**: Claim, error-analysis, label and topic reviews marked 'LLM reviewer' were done by Claude (Anthropic) in a chat session, from excerpts I pasted. They were not done by a human and not by automated Gemini prompts.
-- TODO(me): Conduct manual human review of sampled claims, misclassified reviews, and topic coherence.
+- Not done: manual human review of sampled claims, misclassified reviews, and topic coherence.
