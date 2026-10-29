@@ -17,6 +17,13 @@ WARNING_MESSAGES = [
 ]
 
 
+def sanitize_formula(val: str) -> str:
+    """Guard against CSV / spreadsheet formula injection."""
+    if val and isinstance(val, str) and val[0] in ("=", "+", "-", "@", "\t"):
+        return "'" + val
+    return val
+
+
 def analyze(
     file_bytes: bytes,
     filename: str,
@@ -107,7 +114,7 @@ def analyze(
 
         all_rows.append({
             "row_id": idx,
-            "scrubbed_text": scrubbed,
+            "scrubbed_text": sanitize_formula(scrubbed),
             "label": label,
             "probability": prob,
             "theme": theme

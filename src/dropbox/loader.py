@@ -4,16 +4,20 @@ import io
 import os
 import pandas as pd
 from typing import Optional, Tuple
+from openpyxl import load_workbook
+
 from src.dropbox.errors import (
     EmptyFileError,
     InvalidFileTypeError,
     FileSizeLimitError,
     NoTextColumnError,
     ColumnNotFoundError,
+    SheetLimitError,
 )
 
 MAX_FILE_BYTES = 5 * 1024 * 1024  # 5 MB
 MAX_ROWS = 3000
+MAX_COLS = 50
 
 
 def load_file(
@@ -41,19 +45,57 @@ def load_file(
             f"Unsupported file format '{ext}'. Only .csv and .xlsx files are supported."
         )
 
-    # Read dataframe from bytes
     buffer = io.BytesIO(file_bytes)
-    try:
-        if ext == ".csv":
+
+    if ext == ".csv":
+        df = None
+        for enc in ["utf-8-sig", "latin-1"]:
             try:
-                df = pd.read_csv(buffer, encoding="utf-8")
-            except UnicodeDecodeError:
                 buffer.seek(0)
-                df = pd.read_csv(buffer, encoding="latin1")
-        else:  # .xlsx
+                df = pd.read_csv(buffer, encoding=enc)
+                break
+            except Exception:
+                continue
+
+        if df is None:
+            raise EmptyFileError("Failed to decode CSV with utf-8-sig or latin-1 encoding.")
+
+    else:  # .xlsx
+        # Pre-validate row/column caps with openpyxl in read_only mode
+        try:
+            buffer.seek(0)
+            wb = load_workbook(buffer, read_only=True, data_only=True)
+            sheet = wb.active
+            rows_iter = sheet.iter_rows(values_only=True)
+            header_row = next(rows_iter, None)
+
+            if header_row is None:
+                wb.close()
+                raise EmptyFileError("Uploaded Excel file contains no header row.")
+
+            num_cols = len([c for c in header_row if c is not None])
+            if num_cols > MAX_COLS:
+                wb.close()
+                raise SheetLimitError(
+                    f"Excel file has {num_cols} columns, exceeding the maximum allowed limit of {MAX_COLS} columns."
+                )
+
+            data_row_count = 0
+            for _ in rows_iter:
+                data_row_count += 1
+                if data_row_count > MAX_ROWS:
+                    wb.close()
+                    raise SheetLimitError(
+                        f"Excel file exceeds maximum allowed limit of {MAX_ROWS} data rows."
+                    )
+            wb.close()
+
+            buffer.seek(0)
             df = pd.read_excel(buffer)
-    except Exception as e:
-        raise EmptyFileError(f"Failed to parse file: {e}")
+        except (SheetLimitError, EmptyFileError):
+            raise
+        except Exception as e:
+            raise EmptyFileError(f"Failed to parse Excel file: {e}")
 
     rows_in = len(df)
     if rows_in == 0 or len(df.columns) == 0:
@@ -76,6 +118,9 @@ def load_file(
         best_col = None
         max_mean_len = -1.0
         for col in df.columns:
+            # Exclude purely numeric columns from automatic text detection
+            if pd.api.types.is_numeric_dtype(df[col]):
+                continue
             non_null_share = df[col].notna().mean()
             if non_null_share >= 0.5:
                 # Calculate mean length of non-null strings
@@ -100,11 +145,9 @@ def load_file(
         col_lower = str(col).lower()
         if col_lower in ["id", "review_id", "index"] or col_lower.startswith("unnamed"):
             continue
-        # Check if numeric or convertible to numeric
         numeric_series = pd.to_numeric(df[col], errors="coerce")
         valid_numeric = numeric_series.dropna()
         if len(valid_numeric) >= 0.5 * len(df) and len(valid_numeric) > 0:
-            # Check if at least 90% of numeric values are within 1 to 5
             in_range_share = (valid_numeric.isin([1, 2, 3, 4, 5]) | ((valid_numeric >= 1.0) & (valid_numeric <= 5.0))).mean()
             if in_range_share >= 0.90:
                 candidate_rating_cols.append(col)

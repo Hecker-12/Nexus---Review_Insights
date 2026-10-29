@@ -240,3 +240,8 @@ def search_reviews(
             ))
 
     return results
+
+
+# --- Dropbox Router Registration ---
+from src.api.dropbox_router import router as dropbox_router
+app.include_router(dropbox_router, prefix="/dropbox", tags=["dropbox"])

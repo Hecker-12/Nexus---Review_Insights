@@ -28,3 +28,8 @@ class NoTextColumnError(DropboxError):
 class ColumnNotFoundError(DropboxError):
     """Raised when a specified column override does not exist in the dataset."""
     pass
+
+
+class SheetLimitError(DropboxError):
+    """Raised when an Excel file exceeds row or column caps before full loading."""
+    pass
