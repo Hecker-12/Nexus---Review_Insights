@@ -1,0 +1,3 @@
+model,topics,outlier_fraction,npmi,note
+BERTopic negative (unmerged),92,33.38%,0.0568,These scores come from a different corpus (negative reviews only) and are NOT directly comparable with the earlier table.
+BERTopic negative (merged 14 themes),14,33.38%,-0.0015,These scores come from a different corpus (negative reviews only) and are NOT directly comparable with the earlier table.
