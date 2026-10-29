@@ -34,8 +34,8 @@ flowchart TD
 
     subgraph Storage & Serving
         MERGED & BERT_FT & LLM_SUM --> SQLITE[(insights.db SQLite)]
-        EMB & SQLITE --> FASTAPI[FastAPI REST API: /sentiment, /themes, /summary, /search]
-        FASTAPI --> STREAMLIT[Streamlit Dashboard: Overview, Theme Explorer, Search]
+        EMB & SQLITE --> FASTAPI[FastAPI REST API: /sentiment, /themes, /summary, /search, /dropbox]
+        FASTAPI --> STREAMLIT[Streamlit Dashboard: Overview, Theme Explorer, Search, Drop your data]
     end
 ```
 
@@ -170,7 +170,7 @@ Spot-checks conducted across merged themes revealed clear distinctions in topic 
 
 ## 8. Dashboard Screenshots
 
-The interactive dashboard consists of three tabs and contextual safety banners:
+The interactive dashboard consists of four tabs and contextual safety banners:
 
 | Overview Tab | Theme Explorer Tab |
 |:---:|:---:|
@@ -182,11 +182,107 @@ The interactive dashboard consists of three tabs and contextual safety banners:
 | ![Mixed Theme Warning](results/screenshots/03_mixed_theme_warning.png) | ![Search Results](results/screenshots/04_search_results.png) |
 | *Caution for composite themes (5, 20, 28)* | *Top 10 cosine-similarity results for "coffee maker leaking"* |
 
+| Drop Your Data (Initial State) | Drop Your Data (Scored Results) |
+|:---:|:---:|
+| ![Drop Your Data Empty](results/screenshots/05_drop_your_data_empty.png) | ![Drop Your Data Results](results/screenshots/06_drop_your_data_results.png) |
+| *Upload form, file size/row limits, and domain warnings* | *300-row held-out sample KPIs, ratings comparison, and theme chart* |
+
 ---
 
-## 9. How to Run
+## 9. Drop Your Data (Score and Match Your Own Reviews)
 
-### (a) Local Environment Setup
+Nexus provides an upload pipeline and dashboard tab allowing users to score sentiment and match their own customer reviews against the 29 project themes.
+
+### (a) Capabilities & Constraints
+- **Supported Formats**: `.csv` (UTF-8-sig or Latin-1) and `.xlsx` (Excel).
+- **File Size Cap**: Maximum **5.0 MB** (`5 * 1024 * 1024` bytes). Oversized files return HTTP 413.
+- **Row Limits**:
+  - CSV files with over 3,000 rows are randomly sampled down to **3,000 rows** using fixed seed `random_state=42`.
+  - Excel files exceeding 3,000 data rows are rejected before full loading with HTTP 400.
+- **Column Limits**: Maximum **50 columns**.
+- **Column Detection**: Automatic heuristic detection identifies the review text column (highest mean string length among non-numeric columns with $\ge 50\%$ non-null entries) and an optional 1–5 star rating column ($\ge 90\%$ values in $[1, 5]$). Users can also specify a column name explicitly via the `text_column` parameter.
+
+### (b) Domain Warnings
+Every analysis response and the user interface display two warnings:
+1. *"Models were trained on Amazon product reviews; accuracy on other text may be lower."*
+2. *"Themes are the 29 Amazon-product themes found in this project; they may not fit your data."*
+
+### (c) Privacy & Data Security
+- **In-Memory Processing**: Uploaded reviews are processed entirely in memory in worker threadpools. Uploaded text is never logged, never stored in any database, and never persisted to disk.
+- **No LLM Used**: Scoring and matching rely entirely on saved local scikit-learn and sentence-transformer models. No external LLM or cloud API is invoked.
+- **Formula Injection Guard**: Any cell beginning with `=`, `+`, `-`, `@`, or tab (`\t`) is escaped with a leading single quote prefix (`'`).
+- **PII Placeholders**: All incoming review texts pass through regex masking before scoring and output generation. Raw emails are replaced with `<EMAIL>`, phone numbers with `<PHONE>`, and web links with `<URL>`.
+
+### (d) Methodology & Model Mechanics
+- **Sentiment Classification**: Predictions use the saved TF-IDF vectorizer and Logistic Regression classifier (`models/tfidf_vectorizer.joblib`, `models/logreg_sentiment.joblib`).
+  - *No Neutral Class*: The sentiment model is strictly binary (`positive` / `negative`). Predicted probabilities near 0.5 mean the text has no clear sentiment.
+- **Theme Matching**: Computed by calculating cosine similarity between unit-normalized `all-MiniLM-L6-v2` review embeddings and the 29 precomputed unit-normalized theme centroids (excluding outlier topic -1).
+  - *Thresholds*: A review is assigned to the top theme if cosine similarity $\ge 0.30$ and the margin over the second-best theme $\ge 0.03$. Otherwise, it is labeled `Unassigned`. These thresholds are untuned.
+  - *Amazon Product Specificity*: Because the 29 themes represent specific Amazon product clusters, non-product text is expected to be labeled `Unassigned`.
+- **Ground-Truth Rating Evaluation**: When a rating column is detected, reviews with ratings 1–2 are evaluated as negative and 4–5 as positive. Neutral 3-star reviews are ignored.
+- **Cold-Start Latency**: Models are loaded lazily upon the first request to `/dropbox/analyze`. On server start, this first call took **10.17 s** (subsequent warm calls took **6.06 s**).
+- **Docker Image Notice**: Docker images predate this feature and were not rebuilt.
+
+### (e) Automatic Acceptance Check Results
+Detailed acceptance test logs and profiling are recorded in [`results/dropbox_notes.md`](results/dropbox_notes.md).
+- **Held-Out Test Sample Check** (from `data/processed/test.parquet`, not used for training):
+  - **300 rows** (`random_state=3`): **89.00% accuracy**, **0.8887 macro F1**, rows used = 300, 87.0% assigned to a theme.
+  - **1,000 rows** (`random_state=4`): **88.70% accuracy**, **0.8867 macro F1**, rows used = 1,000.
+- **Not-Amazon Text Check** (40 generated non-product texts: tweets, support messages, news comments):
+  - HTTP 200, both warnings present, no crash.
+  - Sentiment split: 29 positive (72.5%) / 11 negative (27.5%).
+  - Share `Unassigned`: **80.0%** (32 / 40).
+  - Share with probability $< 0.65$: **67.5%** (27 / 40).
+
+---
+
+## 10. How to Run
+
+### (a) Repository Structure
+
+```
+review-insights/
+├── app/
+│   └── dashboard.py                  # Streamlit dashboard (4 tabs)
+├── config/
+│   ├── complaint_types.json          # Initial complaint prototypes
+│   └── complaint_types_v2.json       # 11 complaint types with prototype sentences
+├── notebooks/                        # Numbered research notebooks (01 to 10)
+├── results/                          # Evaluation metrics, reports, and screenshots
+│   ├── dropbox_notes.md              # Acceptance checks and cold-start profiling
+│   └── screenshots/                  # Dashboard PNG captures (01 to 06)
+├── scripts/
+│   └── acceptance_dropbox.py         # Automated end-to-end acceptance test script
+├── src/
+│   ├── api/
+│   │   ├── main.py                   # FastAPI REST backend
+│   │   └── dropbox_router.py         # Endpoints: GET /dropbox/limits, POST /dropbox/analyze
+│   ├── dropbox/                      # Core Drop-your-data processing pipeline
+│   │   ├── cleaning.py               # Text cleaning and deduplication
+│   │   ├── errors.py                 # Structured exception classes
+│   │   ├── loader.py                 # CSV/XLSX loader and column detector
+│   │   ├── pii.py                    # Regex PII scrubbing
+│   │   ├── pipeline.py               # End-to-end analyze pipeline
+│   │   ├── scorer.py                 # TF-IDF + Logistic Regression sentiment scorer
+│   │   └── themes.py                 # Centroid-based 29-theme matcher
+│   ├── cleaning.py                   # Raw data cleaning utilities
+│   ├── complaints.py                 # BERTopic clustering on negative reviews
+│   ├── complaint_types.py            # Predefined complaint taxonomy matcher
+│   ├── db.py                         # SQLite database builder
+│   ├── llm.py                        # LLM wrapper with caching
+│   ├── sentiment.py                  # Sentiment metrics computation
+│   ├── summaries.py                  # Grounded summary generation & checks
+│   └── topics.py                     # Topic modeling and coherence utilities
+└── tests/                            # Pytest test suite (36 tests)
+    ├── conftest.py                   # Test configuration
+    ├── test_api.py                   # Tests for core API endpoints
+    ├── test_dashboard.py             # Streamlit AppTest suite
+    ├── test_dropbox_api.py           # Integration tests for /dropbox endpoints
+    └── dropbox/
+        └── test_dropbox.py           # Unit tests for dropbox package
+```
+
+### (b) Local Environment Setup
 
 Requires Python 3.11:
 
@@ -206,7 +302,7 @@ source .venv311/bin/activate
 pip install -r requirements.txt
 ```
 
-### (b) Data Regeneration Order
+### (c) Data Regeneration Order
 
 Note: `data/` and `models/` are excluded from version control. To regenerate all processed artifacts:
 1. `notebooks/01_cleaning.ipynb` — Clean and tokenize raw reviews to `data/processed/reviews_clean.parquet`.
@@ -219,7 +315,7 @@ Note: `data/` and `models/` are excluded from version control. To regenerate all
 
 > **Environment Variables**: Set `${GEMINI_API_KEY}` and optionally `LLM_MODEL=gemini-1.5-flash` in `.env` before running LLM generation scripts.
 
-### (c) Running API & Dashboard
+### (d) Running API & Dashboard
 
 ```bash
 # Terminal 1: Start FastAPI REST Backend
@@ -229,9 +325,13 @@ uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --reload
 streamlit run app/dashboard.py
 ```
 
-Access the dashboard at `http://localhost:8501` and interactive Swagger docs at `http://localhost:8000/docs`.
+Access the dashboard at `http://localhost:8501` and interactive Swagger docs at `http://localhost:8000/docs`. The dashboard includes four tabs:
+1. **Overview**: Overall KPIs, % negative bar chart, full theme table.
+2. **Theme Explorer**: Deep dive into individual themes with praises, complaints, and cited review IDs.
+3. **Search**: Semantic vector search across all 50,000 reviews using cosine similarity.
+4. **Drop your data**: Upload CSV or Excel files for in-memory scoring, theme matching, and CSV export.
 
-### (d) Running with Docker Compose
+### (e) Running with Docker Compose
 
 ```bash
 docker compose up
@@ -240,7 +340,7 @@ docker compose up
 
 ---
 
-## 10. Limitations & Future Roadmap
+## 11. Limitations & Future Roadmap
 
 ### Known Limitations
 1. **Binary Classification**: Neutral or mixed customer sentiment is forced into binary buckets (`positive` / `negative`).
@@ -250,8 +350,8 @@ docker compose up
 5. **Predefined Complaint Taxonomy**: Prototype-similarity matching leaves 47.71% of negative reviews unassigned in "Other / unclear".
 
 ### Future Work
-- **Score-Your-Text Box**: An interactive tool to score arbitrary single reviews with calibrated sentiment probabilities.
-- **Upload and Analyze**: Batch processing for uploaded CSV files to categorize sentiment and failure modes, with strict client-side data privacy.
+- **New Topic Discovery on Uploaded Data**: Performing unsupervised clustering on uploaded data that falls outside the 29 existing product themes.
+- **Background Processing for Large Files**: Asynchronous worker queue processing for larger batches beyond the 3,000-row limit.
 - **Complaint Summaries**: Generating grounded, citation-backed summaries specifically for each complaint category.
 - **Topics on Negative Reviews with a Better Method**: Exploring hierarchical clustering with adaptive density estimation or contrastive clustering to extract granular failure modes from negative reviews without product-category entanglement.
 - **Dated Dataset for Trends**: Augmenting with timestamped e-commerce review streams to detect defect spikes and emerging failure trends over time.
@@ -259,7 +359,7 @@ docker compose up
 
 ---
 
-## 11. Verification & Quality Control: Who Checked What
+## 12. Quality Control: Who Checked What
 
 | Component / Task | Automatic Checks | LLM Reviewer | Human (me) |
 |:---|:---|:---|:---|
@@ -269,10 +369,11 @@ docker compose up
 | **Topic Quality** | None | Spot-check of 5 themes | Not done |
 | **Complaint Taxonomy** | Thresholds | About 10 reviews per type | Not done |
 | **API Endpoints** | 7 passing tests (tests/test_api.py) | None | Not done |
+| **Drop box** | 36 passing tests (unit & integration) + acceptance script (held-out accuracy: 89.00% on 300 rows, 88.70% on 1,000 rows) | None | Not done |
 
 ---
 
-## 12. Methods & Transparency Note
+## 13. Methods & Transparency Note
 
 - **LLM Used**: Grounded summaries were generated using a Gemini Flash-Lite model (exact version not recorded; current setting: gemini-2.5-flash-lite), temperature 0.0, and stratified sample prompts.
 - **LLM Reviewer**: Claim, error-analysis, label and topic reviews marked 'LLM reviewer' were done by Claude (Anthropic) in a chat session, from excerpts I pasted. They were not done by a human and not by automated Gemini prompts.
