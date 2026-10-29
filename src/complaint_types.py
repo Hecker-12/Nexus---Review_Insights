@@ -146,3 +146,30 @@ def cross_complaint_by_product_theme(
 
     top_pairs_df = pd.DataFrame(pairs).sort_values("share", ascending=False).reset_index(drop=True)
     return shares_table, top_pairs_df
+
+
+def compute_type_transitions(
+    v1_df: pd.DataFrame,
+    v2_df: pd.DataFrame,
+) -> Tuple[int, pd.DataFrame]:
+    """Compute transitions between v1 and v2 complaint classifications.
+    
+    Returns (total_changed, transitions_table).
+    """
+    merged = v1_df[["review_id", "complaint_type"]].merge(
+        v2_df[["review_id", "complaint_type"]],
+        on="review_id",
+        suffixes=("_v1", "_v2"),
+    )
+    changed_mask = merged["complaint_type_v1"] != merged["complaint_type_v2"]
+    total_changed = int(changed_mask.sum())
+
+    changed_df = merged[changed_mask]
+    transitions = (
+        changed_df.groupby(["complaint_type_v1", "complaint_type_v2"])
+        .size()
+        .reset_index(name="count")
+        .sort_values("count", ascending=False)
+        .reset_index(drop=True)
+    )
+    return total_changed, transitions
