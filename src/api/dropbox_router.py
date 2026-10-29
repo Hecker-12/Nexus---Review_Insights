@@ -63,7 +63,7 @@ def analyze_dropbox(
     request: Request,
     file: UploadFile = File(...),
     text_column: Optional[str] = Form(None),
-    include_themes: bool = Form(True)
+    include_themes: Optional[str] = Form("true")
 ) -> Dict[str, Any]:
     """Analyze an uploaded CSV or XLSX file.
 
@@ -107,13 +107,18 @@ def analyze_dropbox(
     # 4. Lazy thread-safe model initialization
     _ensure_models_loaded()
 
+    # Determine include_themes boolean flag (default True)
+    inc_themes = True
+    if include_themes is not None:
+        inc_themes = str(include_themes).strip().lower() not in ["false", "0", "no"]
+
     # 5. Execute pipeline
     try:
         result = analyze(
             file_bytes=chunk,
             filename=filename,
             text_column=text_column,
-            include_themes=include_themes
+            include_themes=inc_themes
         )
         return result
     except (EmptyFileError, NoTextColumnError, ColumnNotFoundError, SheetLimitError) as e:
