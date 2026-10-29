@@ -212,6 +212,7 @@ Every analysis response and the user interface display two warnings:
 - **No LLM Used**: Scoring and matching rely entirely on saved local scikit-learn and sentence-transformer models. No external LLM or cloud API is invoked.
 - **Formula Injection Guard**: Any cell beginning with `=`, `+`, `-`, `@`, or tab (`\t`) is escaped with a leading single quote prefix (`'`).
 - **PII Placeholders**: All incoming review texts pass through regex masking before scoring and output generation. Raw emails are replaced with `<EMAIL>`, phone numbers with `<PHONE>`, and web links with `<URL>`.
+- **Search Command Note**: The file `results/verification_report.md` contains the text of a search command with the string "AIza" and no credential.
 
 ### (d) Methodology & Model Mechanics
 - **Sentiment Classification**: Predictions use the saved TF-IDF vectorizer and Logistic Regression classifier (`models/tfidf_vectorizer.joblib`, `models/logreg_sentiment.joblib`).
@@ -220,19 +221,22 @@ Every analysis response and the user interface display two warnings:
   - *Thresholds*: A review is assigned to the top theme if cosine similarity $\ge 0.30$ and the margin over the second-best theme $\ge 0.03$. Otherwise, it is labeled `Unassigned`. These thresholds are untuned.
   - *Amazon Product Specificity*: Because the 29 themes represent specific Amazon product clusters, non-product text is expected to be labeled `Unassigned`.
 - **Ground-Truth Rating Evaluation**: When a rating column is detected, reviews with ratings 1–2 are evaluated as negative and 4–5 as positive. Neutral 3-star reviews are ignored.
-- **Cold-Start Latency**: Models are loaded lazily upon the first request to `/dropbox/analyze`. On server start, this first call took **10.17 s** (subsequent warm calls took **6.06 s**).
+- **Upload Latency**: Models are loaded lazily upon the first request to `/dropbox/analyze`. Measured values on this machine: first call **10.17 s** and warm call **6.06 s** for 300 rows, about **0.02 s per row** for theme matching (so a 3,000-row file would take about a minute; marked as an estimate).
 - **Docker Image Notice**: Docker images predate this feature and were not rebuilt.
 
 ### (e) Automatic Acceptance Check Results
 Detailed acceptance test logs and profiling are recorded in [`results/dropbox_notes.md`](results/dropbox_notes.md).
 - **Held-Out Test Sample Check** (from `data/processed/test.parquet`, not used for training):
-  - **300 rows** (`random_state=3`): **89.00% accuracy**, **0.8887 macro F1**, rows used = 300, 87.0% assigned to a theme.
-  - **1,000 rows** (`random_state=4`): **88.70% accuracy**, **0.8867 macro F1**, rows used = 1,000.
-- **Not-Amazon Text Check** (40 generated non-product texts: tweets, support messages, news comments):
+  - **300 rows** (`random_state=3`): **0.890 sentiment accuracy** (**89.00%**), **0.8887 macro F1**, rows used = 300.
+  - **1,000 rows** (`random_state=4`): **0.887 sentiment accuracy** (**88.70%**), **0.8867 macro F1**, rows used = 1,000.
+  - *Evaluation Scope*: Sentiment accuracy 0.890 (300 rows) and 0.887 (1,000 rows) were checked on held-out rows from `test.parquet`, sampled in an automatic acceptance script, and the official model accuracy remains **0.9017** on the full 10,000-row test set; these two checks only confirm the feature runs end to end.
+  - *Theme Assignment Rate Note*: The 87.0% theme-assignment rate on those rows is NOT held out (the theme centroids were built from all 50,000 reviews) and is not an evaluation.
+- **Not-Amazon Text Check** (40 non-product texts written by the acceptance script: tweets, support messages, news comments):
   - HTTP 200, both warnings present, no crash.
   - Sentiment split: 29 positive (72.5%) / 11 negative (27.5%).
-  - Share `Unassigned`: **80.0%** (32 / 40).
+  - Share `Unassigned`: **80%** (32 / 40).
   - Share with probability $< 0.65$: **67.5%** (27 / 40).
+  - *Domain Shift Illustration*: On these 40 non-product texts written by the acceptance script, 80% were Unassigned and 67.5% had probability below 0.65. At least two of the five printed examples had a wrong sentiment label (Row 2 prompt utility bill resolution mislabeled negative; Row 3 stressful doubled commute mislabeled positive) and one had a spurious theme match (Row 2 utility support matched to "Batteries and chargers"). This illustrates the domain shift warning; it is not a measured accuracy because the texts were written by the script and have no ground truth.
 
 ---
 

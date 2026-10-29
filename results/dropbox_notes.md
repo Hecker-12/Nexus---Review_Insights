@@ -61,6 +61,7 @@ The drop-your-data pipeline relies on lazy, thread-safe model initialization upo
 - **Measured Step 2A Timings (live server start)**:
   - First `POST /dropbox/analyze` (300-row sample from `test.parquet`, cold start): **10.17 s**
   - Second `POST /dropbox/analyze` (identical 300-row sample, warm call): **6.06 s**
+  - Theme matching latency: about **0.02 s per row** (so a 3,000-row file would take about a minute; marked as an estimate)
 - **Component Breakdown from Earlier Profiling**:
   - TF-IDF vectorizer + Logistic Regression loading: **15.7 s**
   - Theme centroid loading & unit normalization (29 centroids): **0.09 s**
@@ -78,6 +79,7 @@ The endpoint enforces strict resource boundaries:
   - Excel (`.xlsx`) files with >3,000 rows are rejected before loading with HTTP 400 (`SheetLimitError`).
 - **Maximum column cap**: **50 columns**. Sheets exceeding 50 columns are rejected with HTTP 400.
 - **Supported extensions**: `.csv` and `.xlsx` only. All other file extensions return HTTP 415.
+- **Search Command Note**: The file `results/verification_report.md` contains the text of a search command with the string "AIza" and no credential.
 
 ---
 
@@ -96,7 +98,7 @@ The endpoint enforces strict resource boundaries:
   - Accuracy: **0.8870** (0.887)
   - Macro F1: **0.8867** (0.887)
 
-*Methodological note*: The 40-row synthetic test from early unit testing (accuracy 1.0) and the 87.8% in-sample theme assignment rate from earlier development checks were NOT evaluations; they were sanity checks. The held-out checks above on 300 and 1,000 rows from `test.parquet` (not used for model training) represent the actual automatic accuracy checks.
+*Methodological note*: Sentiment accuracy 0.890 (300 rows) and 0.887 (1,000 rows) were checked on held-out rows from `test.parquet`, sampled in an automatic acceptance script, and official model accuracy remains **0.9017** on the full 10,000-row test set; these two checks only confirm the feature runs end to end. The 87.0% theme-assignment rate on those rows is NOT held out (theme centroids were built from all 50,000 reviews) and is not an evaluation. The 40-row synthetic test from early unit testing (accuracy 1.0) and the 87.8% in-sample theme rate from earlier were likewise NOT evaluations.
 
 ### Step 2C: Not-Amazon Text Check (40 Short Non-Product Texts)
 Evaluated on 40 generated short texts (tweets, support messages, news comments) of mixed sentiment:
@@ -112,7 +114,9 @@ Evaluated on 40 generated short texts (tweets, support messages, news comments) 
   2. Row 1: `[POSITIVE 0.7979]` Theme: `Unassigned` | *"loving the crisp autumn morning air and gorgeous colorful trees today!"*
   3. Row 2: `[NEGATIVE 0.5930]` Theme: `Batteries and chargers` | *"customer support at my local electric utility resolved my billing question in five minutes"*
   4. Row 3: `[POSITIVE 0.7614]` Theme: `Unassigned` | *"the new commuter train schedule makes my morning commute twice as long and stressful"*
-  5. Row 4: `[POSITIVE 0.6320]` Theme: `Unassigned` | *"congratulations to our neighborhood soccer team on advancing to the state championship!"*
+  5. Row 4: `[POSITIVE 0.6320]` Theme: `Unassigned` | *"congratulations to our neighborhood soccer team on advancing to the state championship!"* 
+
+*Domain Shift Note*: On these 40 non-product texts written by the acceptance script, 80% were Unassigned and 67.5% had probability below 0.65. At least two of the five printed examples had a wrong sentiment label (Row 2 prompt utility bill resolution mislabeled negative; Row 3 stressful doubled commute mislabeled positive) and one had a spurious theme match (Row 2 utility support matched to "Batteries and chargers"). This illustrates the domain shift warning; it is not a measured accuracy because the texts were written by the script and have no ground truth.
 
 ### Step 2D: Error Handling Checks
 - **1. `.txt` file**: Status **415**, Detail: `Unsupported file format '.txt'. Only .csv and .xlsx files are supported.`
