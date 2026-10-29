@@ -1,6 +1,6 @@
 # Nexus — Customer Review Insights Engine
 
-At scale, thousands of customer reviews go unread, leaving critical product flaws, recurring failure modes, and customer delight signals buried in unstructured text. Product and customer experience teams cannot manually sift through tens of thousands of reviews to extract actionable intelligence. **Nexus** solves this problem on a dataset of **50,000 Amazon product reviews** by providing an end-to-end analytical pipeline: fine-tuned transformer sentiment classification, outlier-aware topic discovery and reduction to **29 core themes**, hallucination-guarded grounded summaries that passed automatic checks, sub-10ms semantic vector search, relational SQLite storage, and an interactive FastAPI + Streamlit dashboard.
+At scale, thousands of customer reviews go unread, leaving critical product flaws, recurring failure modes, and customer delight signals buried in unstructured text. Product and customer experience teams cannot manually sift through tens of thousands of reviews to extract actionable intelligence. **Nexus** addresses this problem on a dataset of **50,000 Amazon product reviews** by providing an end-to-end analytical pipeline: fine-tuned transformer sentiment classification, outlier-aware topic discovery and reduction to **29 core themes**, hallucination-guarded grounded summaries that passed automatic checks, sub-10ms semantic vector search, relational SQLite storage, and an interactive FastAPI + Streamlit dashboard.
 
 ---
 
@@ -90,10 +90,48 @@ All metrics below are drawn directly from `results/sentiment_comparison.csv`, `r
 
 ---
 
-## 4. Key Findings
+## 4. Additional Exploratory Analysis: What Negative Reviews Are About
+
+*(Exploratory, not part of the evaluated pipeline)*
+
+An exploratory investigation was conducted on the subset of **24,669 negative reviews** to determine whether complaint-specific failure modes could be isolated.
+
+### (a) BERTopic on Negative Reviews
+Fitting BERTopic directly on negative reviews using precomputed `all-MiniLM-L6-v2` embeddings clustered primarily by product category rather than complaint type:
+- **Unmerged (92 topics, 33.38% outliers)**: NPMI **0.0568**
+- **Merged (14 themes, 33.38% outliers)**: NPMI **-0.0015**
+
+Because the merged model showed negative coherence and remained split along product lines (e.g., books, movies, audio equipment) rather than failure modes, those 14 themes were not labeled or summarized.
+
+### (b) Predefined Complaint-Type Taxonomy
+To categorize complaints across product boundaries, a predefined 11-type taxonomy was constructed with customer-phrased prototype sentences (`config/complaint_types_v2.json`) and embedded using `all-MiniLM-L6-v2`. Using centroid cosine similarity with conservative thresholds ($\text{similarity} \ge 0.30$, $\text{margin} \ge 0.03$), **52.29%** (12,899 / 24,669) of negative reviews matched a complaint type:
+- **Disliked the content (plot, writing, acting, music)**: **35.77%** (8,825 reviews), capturing creative dissatisfaction in media categories (books, movies, music).
+- **Product-problem types**: **15.50%** (**3,823 reviews**) matched concrete product failure categories:
+  - *Poor quality or broke easily*: 764 (3.10%)
+  - *Stopped working or defective*: 675 (2.74%)
+  - *Wrong item or not as described or pictured*: 422 (1.71%)
+  - *Delivery problem: late, never arrived, damaged in shipping*: 417 (1.69%)
+  - *Bad taste, smell or skin reaction*: 411 (1.67%)
+  - *Hard to install, set up, or not compatible*: 384 (1.56%)
+  - *Leaks or spills*: 340 (1.38%)
+  - *Poor fit or wrong size*: 205 (0.83%)
+  - *Poor customer service, refund or return problems*: 205 (0.83%)
+- **Unreliable noise type**: The type *Too loud or noisy* matched 251 reviews (1.02%); its 251 matches (1.02%) are unreliable (about 3 to 4 of 10 sampled looked correct to an LLM reviewer) and remain in the saved v2 file. (Including this type would sum to 4,074 reviews or 16.51%, but **15.5%** is the headline product-problem figure).
+- **Other / unclear**: **47.71%** (11,770 reviews) fell below the similarity or margin threshold.
+
+### (c) Exploratory Methodological Limits
+- The taxonomy is predefined rather than unsupervised.
+- Prototypes were revised once after viewing samples, so sample-based observations are not independent.
+- Qualitative assessments relied on a small LLM-reviewed sample (about 10 reviews per type).
+- The noise type: its 251 matches (1.02%) are unreliable (about 3 to 4 of 10 sampled looked correct to an LLM reviewer) and remain in the saved v2 file.
+- The shares are lower bounds because 47.7% (11,770 reviews) remain "Other / unclear".
+
+---
+
+## 5. Key Findings
 
 1. **Fine-Tuning Gain**: Fine-tuning DistilBERT yielded **94.68% accuracy** and **0.9468 Macro F1**, outperforming the zero-shot baseline (89.80%) by **+4.88%** and cutting false positives from 428 to 273.
-2. **Domain Shift & Linear Baseline**: TF-IDF + Logistic Regression achieved **90.17% accuracy**, proving to be a remarkably strong baseline on in-domain Amazon review vocabulary compared to tuned VADER (77.07%).
+2. **Domain Shift & Linear Baseline**: TF-IDF + Logistic Regression achieved **90.17% accuracy**, proving to be a strong baseline on in-domain Amazon review vocabulary compared to tuned VADER (77.07%).
 3. **Coherence vs Human Judgment**: While BERTopic v1 achieved higher NPMI (0.0983) with 109 micro-clusters, 109 topics is overwhelming for decision-makers. Hierarchically merging to 29 themes (NPMI 0.0401) created human-interpretable product themes.
 4. **Outlier Reassignment Noise**: Reassigning the 45.2% HDBSCAN outliers via cosine similarity introduced noise; spot-checks revealed clear thematic alignment in only 4 of 8 examined cases.
 5. **LLM Labels Needing Correction**: Raw cluster labels required manual refinement: 22 of 29 labels were adjusted, with about 10 fixing real miscategorizations where raw keywords were overly generic or skewed by dominant words.
@@ -106,7 +144,7 @@ All metrics below are drawn directly from `results/sentiment_comparison.csv`, `r
 
 ---
 
-## 5. Error Analysis
+## 6. Error Analysis
 
 In error analysis across the 10,000-review test split:
 - **Both Models Wrong**: 12 of 15 examined reviews where both TF-IDF and fine-tuned DistilBERT failed were determined by an LLM reviewer to be mislabeled in the ground truth or genuinely unresolvable due to conflicting sentiment.
@@ -117,7 +155,7 @@ In error analysis across the 10,000-review test split:
 
 ---
 
-## 6. Topic Quality Assessment
+## 7. Topic Quality Assessment
 
 Spot-checks conducted across merged themes revealed clear distinctions in topic coherence:
 - **Coherent Themes (LLM-reviewed)**:
@@ -130,7 +168,7 @@ Spot-checks conducted across merged themes revealed clear distinctions in topic 
 
 ---
 
-## 7. Dashboard Screenshots
+## 8. Dashboard Screenshots
 
 The interactive dashboard consists of three tabs and contextual safety banners:
 
@@ -146,7 +184,7 @@ The interactive dashboard consists of three tabs and contextual safety banners:
 
 ---
 
-## 8. How to Run
+## 9. How to Run
 
 ### (a) Local Environment Setup
 
@@ -195,33 +233,44 @@ Access the dashboard at `http://localhost:8501` and interactive Swagger docs at 
 
 ### (d) Running with Docker Compose
 
-```bash
-docker compose up --build
-```
-This builds and starts:
-- `api` on `http://localhost:8000` (mounting `./data/processed` read-only)
-- `dashboard` on `http://localhost:8501` (communicating over `http://api:8000`)
+Docker files provided; build and run not re-tested at submission time.
 
 ---
 
-## 9. Limitations & Future Roadmap
+## 10. Limitations & Future Roadmap
 
 ### Known Limitations
-1. **Binary Classification**: Neutral or mixed customer sentiment is forced into binary buckets.
+1. **Binary Classification**: Neutral or mixed customer sentiment is forced into binary buckets (`positive` / `negative`).
 2. **Missing Dates**: The dataset lacks timestamp attributes, precluding velocity, trend, or seasonality tracking.
-3. **45.2% Unclustered Reviews**: HDBSCAN leaves 22,623 reviews in topic `-1` to preserve cluster purity.
+3. **45.2% Unclustered Reviews in Topic Discovery**: HDBSCAN leaves 22,623 reviews in topic `-1` to preserve cluster purity.
 4. **Weakly Supervised Star Labels**: Ground truth labels carry natural reviewer bias and sarcasm.
+5. **Predefined Complaint Taxonomy**: Zero-shot complaint matching leaves 47.71% of negative reviews unassigned in "Other / unclear".
 
-### If I Had 2 More Weeks
-- **Negative-Only Topic Modeling**: Cluster and summarize exclusively negative reviews to build dedicated failure mode taxonomies.
-- **UMAP & HDBSCAN Optimization**: Experiment with soft clustering and density grid search to reduce the 45.2% outlier rate without collapsing cohesive clusters.
-- **Neutral Class Addition**: Introduce a 3-class sentiment model (`negative`, `neutral`, `positive`) to properly capture hedged reviews.
-- **Dated Dataset Integration**: Replace or augment with a timestamped Amazon product dataset to build time-series anomaly detection.
-- **Human Groundedness Labeling**: Conduct human verification alongside automated and LLM reviews.
+### Future Work
+- **Score-Your-Text Box**: An interactive tool to score arbitrary single reviews with calibrated sentiment probabilities.
+- **Upload and Analyze**: Batch processing for uploaded CSV files to categorize sentiment and failure modes, with strict client-side data privacy.
+- **Complaint Summaries**: Generating grounded, citation-backed summaries specifically for each complaint category.
+- **Topics on Negative Reviews with a Better Method**: Exploring hierarchical clustering with adaptive density estimation or contrastive clustering to extract granular failure modes from negative reviews without product-category entanglement.
+- **Dated Dataset for Trends**: Augmenting with timestamped e-commerce review streams to detect defect spikes and emerging failure trends over time.
+- **Human Labeling of Summaries**: Conducting human review of generated claims and praise/complaint summaries alongside automated checks.
 
 ---
 
-## 10. Methods & Transparency Note
+## 11. Verification & Quality Control: Who Checked What
+
+| Component / Task | Automatic Checks | LLM Reviewer | Human (me) |
+|:---|:---|:---|:---|
+| **Sentiment Model Evaluation** | `pytest` test suite, confusion matrix, macro F1 calculations | None | Ran evaluation suite; TODO(me): inspect individual edge-case errors |
+| **Grounded Summaries: Citations** | Parser validated citations against sample IDs; dropped 1 out-of-sample ID (`2706`) | LLM reviewer evaluated 18 sample claims (14 supported, 4 partly) | TODO(me): spot-check full claim texts against original reviews |
+| **Grounded Summaries: Word Overlap** | Regex word-overlap checks against cited review text; flagged 2 false alarms | LLM reviewer checked flagged claims | TODO(me): review non-English Theme 24 claims |
+| **Theme Cluster Labels** | Heuristic keyword overlap check | LLM generated candidate labels (22/29 adjusted) | TODO(me): finalize remaining composite theme names |
+| **Sentiment Error Analysis** | Identification of 15 consensus failure cases | LLM reviewer assessed label noise vs model failure on 15 cases | TODO(me): verify ground-truth label noise in test set |
+| **Complaint Prototypes & Samples** | Threshold filtering ($\text{sim} \ge 0.30$, $\text{margin} \ge 0.03$) | LLM reviewer evaluated small samples (~10 reviews per type); flagged noise type | TODO(me): conduct manual blind validation of complaint categories |
+| **API Endpoints & Integration** | 7 passing FastAPI integration tests in `tests/test_api.py` | None | Tested endpoint responses; TODO(me): test under high concurrent load |
+
+---
+
+## 12. Methods & Transparency Note
 
 - **LLM Used**: Grounded summaries were generated using `gemini-1.5-flash` (via the Gemini free tier) with temperature $0.2$, structured JSON schema enforcement, and stratified sample prompts.
 - **LLM Reviewer**: Claim and topic quality reviews designated as "LLM reviewer" were conducted via automated Gemini evaluation prompts and have not been validated by a human.
