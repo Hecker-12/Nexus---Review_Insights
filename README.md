@@ -1,6 +1,6 @@
 # Nexus — Customer Review Insights Engine
 
-At scale, thousands of customer reviews go unread, leaving critical product flaws, recurring failure modes, and customer delight signals buried in unstructured text. Product and customer experience teams cannot manually sift through tens of thousands of reviews to extract actionable intelligence. **Nexus** addresses this problem on a dataset of **50,000 Amazon product reviews** by providing an end-to-end analytical pipeline: fine-tuned transformer sentiment classification, outlier-aware topic discovery and reduction to **29 core themes**, hallucination-guarded grounded summaries that passed automatic checks, sub-10ms semantic vector search, relational SQLite storage, and an interactive FastAPI + Streamlit dashboard.
+At scale, thousands of customer reviews go unread, leaving critical product flaws, recurring failure modes, and customer delight signals buried in unstructured text. Product and customer experience teams cannot manually sift through tens of thousands of reviews to extract actionable intelligence. **Nexus** addresses this problem on a dataset of **50,000 Amazon product reviews** by providing an end-to-end analytical pipeline: fine-tuned transformer sentiment classification, outlier-aware topic discovery and reduction to **29 core themes**, grounded summaries with automatic citation checks, semantic vector search, relational SQLite storage, and an interactive FastAPI + Streamlit dashboard.
 
 ---
 
@@ -130,11 +130,11 @@ To categorize complaints across product boundaries, a predefined 11-type taxonom
 
 ## 5. Key Findings
 
-1. **Fine-Tuning Gain**: Fine-tuning DistilBERT yielded **94.68% accuracy** and **0.9468 Macro F1**, outperforming the zero-shot baseline (89.80%) by **+4.88%** and cutting false positives from 428 to 273.
+1. **Fine-Tuning Gain**: Fine-tuning DistilBERT yielded **94.68% accuracy** and **0.9468 Macro F1**, outperforming the zero-shot baseline (89.80%) by **+4.88 points** and cutting false positives from 428 to 273.
 2. **Domain Shift & Linear Baseline**: TF-IDF + Logistic Regression achieved **90.17% accuracy**, proving to be a strong baseline on in-domain Amazon review vocabulary compared to tuned VADER (77.07%).
-3. **Coherence vs Human Judgment**: While BERTopic v1 achieved higher NPMI (0.0983) with 109 micro-clusters, 109 topics is overwhelming for decision-makers. Hierarchically merging to 29 themes (NPMI 0.0401) created human-interpretable product themes.
-4. **Outlier Reassignment Noise**: Reassigning the 45.2% HDBSCAN outliers via cosine similarity introduced noise; spot-checks revealed clear thematic alignment in only 4 of 8 examined cases.
-5. **LLM Labels Needing Correction**: Raw cluster labels required manual refinement: 22 of 29 labels were adjusted, with about 10 fixing real miscategorizations where raw keywords were overly generic or skewed by dominant words.
+3. **Coherence vs Human Judgment**: While BERTopic v1 achieved higher NPMI (0.0983) with 109 micro-clusters, 109 topics is overwhelming for decision-makers. Hierarchically merging to 29 themes created human-interpretable product themes; the merged 29-theme NPMI (0.0401) is about the same as LDA k=10 (0.0420), and BERTopic NPMI excludes the 45.2% outliers.
+4. **Outlier Reassignment Noise**: Reassigning the 45.2% HDBSCAN outliers via cosine similarity introduced noise; spot-checks revealed clear thematic alignment in only 4 of 8 examined cases per an LLM review.
+5. **LLM Labels Needing Correction**: Raw cluster labels required manual refinement: 22 of 29 labels were adjusted (suggested by an LLM reviewer and approved by me), with about 10 fixing real miscategorizations where raw keywords were overly generic or skewed by dominant words.
 6. **Themes with Highest Negative Sentiment**: Querying `insights.db` for themes with $\ge 100$ reviews (excluding Unclustered) identified the top 5 pain points:
    - **Cables and TV accessories** (Theme 17): **69.38% negative** (209 reviews)
    - **Baby bottles and diapers** (Theme 18): **68.90% negative** (209 reviews)
@@ -233,7 +233,10 @@ Access the dashboard at `http://localhost:8501` and interactive Swagger docs at 
 
 ### (d) Running with Docker Compose
 
-Docker files provided; build and run not re-tested at submission time.
+```bash
+docker compose up
+```
+*Note: Docker files provided; build and run not re-tested at submission time.*
 
 ---
 
@@ -244,7 +247,7 @@ Docker files provided; build and run not re-tested at submission time.
 2. **Missing Dates**: The dataset lacks timestamp attributes, precluding velocity, trend, or seasonality tracking.
 3. **45.2% Unclustered Reviews in Topic Discovery**: HDBSCAN leaves 22,623 reviews in topic `-1` to preserve cluster purity.
 4. **Weakly Supervised Star Labels**: Ground truth labels carry natural reviewer bias and sarcasm.
-5. **Predefined Complaint Taxonomy**: Zero-shot complaint matching leaves 47.71% of negative reviews unassigned in "Other / unclear".
+5. **Predefined Complaint Taxonomy**: Prototype-similarity matching leaves 47.71% of negative reviews unassigned in "Other / unclear".
 
 ### Future Work
 - **Score-Your-Text Box**: An interactive tool to score arbitrary single reviews with calibrated sentiment probabilities.
@@ -260,18 +263,17 @@ Docker files provided; build and run not re-tested at submission time.
 
 | Component / Task | Automatic Checks | LLM Reviewer | Human (me) |
 |:---|:---|:---|:---|
-| **Sentiment Model Evaluation** | `pytest` test suite, confusion matrix, macro F1 calculations | None | Ran evaluation suite; TODO(me): inspect individual edge-case errors |
-| **Grounded Summaries: Citations** | Parser validated citations against sample IDs; dropped 1 out-of-sample ID (`2706`) | LLM reviewer evaluated 18 sample claims (14 supported, 4 partly) | TODO(me): spot-check full claim texts against original reviews |
-| **Grounded Summaries: Word Overlap** | Regex word-overlap checks against cited review text; flagged 2 false alarms | LLM reviewer checked flagged claims | TODO(me): review non-English Theme 24 claims |
-| **Theme Cluster Labels** | Heuristic keyword overlap check | LLM generated candidate labels (22/29 adjusted) | TODO(me): finalize remaining composite theme names |
-| **Sentiment Error Analysis** | Identification of 15 consensus failure cases | LLM reviewer assessed label noise vs model failure on 15 cases | TODO(me): verify ground-truth label noise in test set |
-| **Complaint Prototypes & Samples** | Threshold filtering ($\text{sim} \ge 0.30$, $\text{margin} \ge 0.03$) | LLM reviewer evaluated small samples (~10 reviews per type); flagged noise type | TODO(me): conduct manual blind validation of complaint categories |
-| **API Endpoints & Integration** | 7 passing FastAPI integration tests in `tests/test_api.py` | None | Tested endpoint responses; TODO(me): test under high concurrent load |
+| **Sentiment Model Evaluation** | Accuracy, macro F1, confusion matrices on the held-out 10,000-review test set | Error samples | TODO(me) |
+| **Grounded Summaries** | Citation parsing (1 out-of-sample ID dropped), word overlap (2 flagged, both false alarms), 6 not checked | 18 claims (14 supported, 4 partly, 0 unsupported) | TODO(me) |
+| **Theme Labels** | None | Gemini drafted labels, Claude suggested corrections (22 of 29 changed, about 10 fixing real errors), I approved them | Approval only |
+| **Topic Quality** | None | Spot-check of 5 themes | TODO(me) |
+| **Complaint Taxonomy** | Thresholds | About 10 reviews per type | TODO(me) |
+| **API Endpoints** | 7 passing tests (tests/test_api.py) | None | TODO(me) |
 
 ---
 
 ## 12. Methods & Transparency Note
 
-- **LLM Used**: Grounded summaries were generated using `gemini-1.5-flash` (via the Gemini free tier) with temperature $0.2$, structured JSON schema enforcement, and stratified sample prompts.
-- **LLM Reviewer**: Claim and topic quality reviews designated as "LLM reviewer" were conducted via automated Gemini evaluation prompts and have not been validated by a human.
+- **LLM Used**: Grounded summaries were generated using `gemini-2.5-flash-lite` (via the Gemini API, temperature `0.0`), structured JSON schema enforcement, and stratified sample prompts.
+- **LLM Reviewer**: Claim, error-analysis, label and topic reviews marked 'LLM reviewer' were done by Claude (Anthropic) in a chat session, from excerpts I pasted. They were not done by a human and not by automated Gemini prompts.
 - TODO(me): Conduct manual human review of sampled claims, misclassified reviews, and topic coherence.
