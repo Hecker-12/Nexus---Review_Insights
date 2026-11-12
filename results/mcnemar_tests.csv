@@ -1,0 +1,5 @@
+comparison,b,c,total_discordant,p_value
+Fine-tuned vs TF-IDF,652,201,853,2.862987270042412e-56
+Zero-shot vs TF-IDF,556,593,1149,0.28821130067389344
+Fine-tuned vs Zero-shot,659,171,830,2.865896082811427e-68
+Ensemble vs Fine-tuned,40,34,74,0.5613807442989817
