@@ -245,3 +245,7 @@ def search_reviews(
 # --- Dropbox Router Registration ---
 from src.api.dropbox_router import router as dropbox_router
 app.include_router(dropbox_router, prefix="/dropbox", tags=["dropbox"])
+
+# --- Explore Router Registration ---
+from src.api.explore_router import router as explore_router
+app.include_router(explore_router, tags=["explore"])

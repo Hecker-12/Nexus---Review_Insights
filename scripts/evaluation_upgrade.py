@@ -44,6 +44,7 @@ def main():
     eval_upgrade_csv = os.path.join("results", "evaluation_upgrade.csv")
     mcnemar_csv = os.path.join("results", "mcnemar_tests.csv")
     calibration_csv = os.path.join("results", "calibration.csv")
+    calibration_summary_csv = os.path.join("results", "calibration_summary.csv")
     calibration_png = os.path.join("results", "calibration.png")
     slice_csv = os.path.join("results", "slice_analysis.csv")
     eval_upgrade_md = os.path.join("results", "evaluation_upgrade.md")
@@ -341,7 +342,7 @@ def main():
                 "count": cnt,
                 "mean_confidence": round(mean_c, 4),
                 "accuracy": round(acc, 4) if not np.isnan(acc) else np.nan,
-                "ece": round(float(ece), 6),
+                "ece_running_total": round(float(ece), 6),
             })
 
         print(f"  => ECE for {model_name}: {ece:.6f}")
@@ -355,6 +356,15 @@ def main():
     df_calibration = pd.DataFrame(calibration_rows)
     df_calibration.to_csv(calibration_csv, index=False)
     print(f"Saved {calibration_csv}")
+
+    # Save calibration summary
+    calib_summary_rows = [
+        {"model": m_name, "ece": round(float(reliability_data[m_name]["ece"]), 4)}
+        for m_name in ["TF-IDF+LogReg", "DistilBERT zero-shot", "DistilBERT fine-tuned"]
+    ]
+    df_calib_summary = pd.DataFrame(calib_summary_rows)
+    df_calib_summary.to_csv(calibration_summary_csv, index=False)
+    print(f"Saved {calibration_summary_csv}")
 
     # Plot reliability diagram
     fig, ax = plt.subplots(figsize=(8, 7))
@@ -490,11 +500,12 @@ def main():
     md_content.append("Calculated across 10 equal-width bins on $[0.50, 1.00]$. Overall ECE values:\n")
     for m_name, d in reliability_data.items():
         md_content.append(f"- **{m_name}**: ECE = **{d['ece']:.4f}**")
-    md_content.append("\n| Model | Bin Index | Bin Range | Count | Mean Confidence | Empirical Accuracy | Cumulative ECE |")
+    md_content.append("\nece_running_total is the cumulative sum of bin contributions; its last row per model is the model's ECE.\n")
+    md_content.append("| Model | Bin Index | Bin Range | Count | Mean Confidence | Empirical Accuracy | Cumulative ECE (ece_running_total) |")
     md_content.append("|:---|:---:|:---:|:---:|:---:|:---:|:---:|")
     for _, r in df_calibration.iterrows():
         acc_str = f"{r['accuracy']:.4f}" if pd.notnull(r['accuracy']) else "EMPTY"
-        md_content.append(f"| {r['model']} | {int(r['bin_index']):d} | [{r['bin_lower']:.2f}, {r['bin_upper']:.2f}] | {int(r['count']):d} | {r['mean_confidence']:.4f} | {acc_str} | {r['ece']:.6f} |")
+        md_content.append(f"| {r['model']} | {int(r['bin_index']):d} | [{r['bin_lower']:.2f}, {r['bin_upper']:.2f}] | {int(r['count']):d} | {r['mean_confidence']:.4f} | {acc_str} | {r['ece_running_total']:.6f} |")
 
     md_content.append("\n## 4. Slice Analysis\n")
     md_content.append("| Slice Category | Slice Name | Sample Size (n) | Small n (< 200) | TF-IDF Accuracy | Zero-Shot Accuracy | Fine-Tuned Accuracy |")
@@ -502,6 +513,19 @@ def main():
     for _, r in df_slice.iterrows():
         small_n_str = "Yes" if r['small_n'] else "No"
         md_content.append(f"| {r['slice_category']} | {r['slice_name']} | {int(r['n']):d} | {small_n_str} | {r['acc_tfidf']:.4f} | {r['acc_zero_shot']:.4f} | {r['acc_fine_tuned']:.4f} |")
+
+    # Fine-tuned accuracy by confidence band subtable
+    acc_ft_above90 = float(np.mean(eval_models["DistilBERT fine-tuned"][conf_ft >= 0.90] == y_true[conf_ft >= 0.90]))
+    n_below90 = int(np.sum(conf_ft < 0.90))
+    n_above90 = int(np.sum(conf_ft >= 0.90))
+    md_content.append("\n### Fine-Tuned Accuracy by Confidence Band\n")
+    md_content.append("| Confidence Band | Review Count (n) | Fine-Tuned Accuracy |")
+    md_content.append("|:---|:---:|:---:|")
+    for band_name, mask in conf_bands:
+        n_b = int(mask.sum())
+        acc_b = float(np.mean(eval_models["DistilBERT fine-tuned"][mask] == y_true[mask]))
+        md_content.append(f"| {band_name} | {n_b} | {acc_b:.4f} |")
+    md_content.append(f"\nExcluding the {n_below90} reviews with fine-tuned confidence below 0.90, accuracy on the remaining {n_above90:,} reviews is {acc_ft_above90:.4f}. The band edges were fixed in advance; this is descriptive and not a tuned threshold.\n")
 
     md_content.append("\n## 5. Methodological Limits\n")
     md_content.append("- **Sampling variability**: Confidence intervals reflect test set sampling variability only and do not account for data collection bias or annotation shifts.")

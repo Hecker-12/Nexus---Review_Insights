@@ -41,7 +41,9 @@ Calculated across 10 equal-width bins on $[0.50, 1.00]$. Overall ECE values:
 - **DistilBERT zero-shot**: ECE = **0.0849**
 - **DistilBERT fine-tuned**: ECE = **0.0295**
 
-| Model | Bin Index | Bin Range | Count | Mean Confidence | Empirical Accuracy | Cumulative ECE |
+ece_running_total is the cumulative sum of bin contributions; its last row per model is the model's ECE.
+
+| Model | Bin Index | Bin Range | Count | Mean Confidence | Empirical Accuracy | Cumulative ECE (ece_running_total) |
 |:---|:---:|:---:|:---:|:---:|:---:|:---:|
 | TF-IDF+LogReg | 0 | [0.50, 0.55] | 568 | 0.5261 | 0.5616 | 0.002016 |
 | TF-IDF+LogReg | 1 | [0.55, 0.60] | 551 | 0.5753 | 0.6116 | 0.004015 |
@@ -95,6 +97,17 @@ Calculated across 10 equal-width bins on $[0.50, 1.00]$. Overall ECE values:
 | Product Themes (>= 100 test reviews) | Video games (Topic 6) | 155 | Yes | 0.9097 | 0.9032 | 0.9484 |
 | Product Themes (>= 100 test reviews) | Batteries and chargers (Topic 7) | 147 | Yes | 0.8980 | 0.8639 | 0.9456 |
 | Product Themes (>= 100 test reviews) | Headphones and phones (Topic 8) | 107 | Yes | 0.9626 | 0.9533 | 0.9813 |
+
+### Fine-Tuned Accuracy by Confidence Band
+
+| Confidence Band | Review Count (n) | Fine-Tuned Accuracy |
+|:---|:---:|:---:|
+| < 0.70 | 238 | 0.5546 |
+| 0.70 to 0.90 | 401 | 0.6708 |
+| > 0.90 | 9361 | 0.9686 |
+
+Excluding the 639 reviews with fine-tuned confidence below 0.90, accuracy on the remaining 9,361 reviews is 0.9686. The band edges were fixed in advance; this is descriptive and not a tuned threshold.
+
 
 ## 5. Methodological Limits
 
