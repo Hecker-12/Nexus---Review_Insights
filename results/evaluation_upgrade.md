@@ -112,6 +112,7 @@ Excluding the 639 reviews with fine-tuned confidence below 0.90, accuracy on the
 ## 5. Methodological Limits
 
 - **Sampling variability**: Confidence intervals reflect test set sampling variability only and do not account for data collection bias or annotation shifts.
+- **Training randomness**: each model was trained once, so the intervals do not include variation from retraining.
 - **Confidence calibration**: Calibration is evaluated against binary correctness using the maximum predicted class probability.
 - **Sample size in slices**: Several slices have sample size below 200 reviews (`small_n = True`), increasing variance in slice-level estimates.
 - **Untuned ensemble**: The ensemble model combines TF-IDF and fine-tuned transformer probabilities using fixed equal weights (0.5 / 0.5) without parameter tuning.

@@ -696,6 +696,7 @@ with tab_methodology:
 
     # 1. Model Performance with 95% Bootstrap CIs
     st.markdown("### 📊 Model Performance (95% Bootstrap CIs, 2,000 resamples)")
+    st.caption("Zero-shot = off-the-shelf SST-2 sentiment model, not trained on Amazon data.")
     eval_table = meth_data.get("evaluation_upgrade.csv")
     if eval_table:
         df_eval = pd.DataFrame(eval_table["rows"], columns=eval_table["columns"])
@@ -869,6 +870,7 @@ with tab_methodology:
     st.caption("*(Embedded verbatim from `results/evaluation_upgrade.md` Section 5)*")
     st.markdown(
         "- **Sampling variability**: Confidence intervals reflect test set sampling variability only and do not account for data collection bias or annotation shifts.\n"
+        "- **Training randomness**: each model was trained once, so the intervals do not include variation from retraining.\n"
         "- **Confidence calibration**: Calibration is evaluated against binary correctness using the maximum predicted class probability.\n"
         "- **Sample size in slices**: Several slices have sample size below 200 reviews (`small_n = True`), increasing variance in slice-level estimates.\n"
         "- **Untuned ensemble**: The ensemble model combines TF-IDF and fine-tuned transformer probabilities using fixed equal weights (0.5 / 0.5) without parameter tuning.\n"
@@ -937,8 +939,11 @@ with tab_complaints:
         if "Too loud or noisy" in df_th_filtered.columns:
             df_th_filtered = df_th_filtered.rename(columns={"Too loud or noisy": "Too loud or noisy (unreliable)"})
 
+        n_named_themes = len([t for t in df_th_filtered["product_theme"] if t != "Unclustered"])
+        has_unclustered = "Unclustered" in df_th_filtered["product_theme"].values
+        theme_desc = f"{n_named_themes} product themes plus the Unclustered group" if has_unclustered else f"{len(df_th_filtered)} product themes"
         st.caption(
-            f"Displaying {len(df_th_filtered)} product themes having at least 100 negative reviews. "
+            f"Displaying {theme_desc}, each with at least 100 negative reviews. "
             "'Other / unclear' is excluded from heatmap colors to highlight specific complaint variations."
         )
 
