@@ -17,25 +17,37 @@ The repository and submission archive contain the following core components:
 - **`src/`**: Core application logic:
   - `src/api/main.py`: FastAPI backend implementing `/sentiment`, `/themes`, `/summary/{id}`, and `/search`.
   - `src/api/dropbox_router.py`: FastAPI endpoints for `GET /dropbox/limits` and `POST /dropbox/analyze`.
+  - `src/api/explore_router.py`: FastAPI endpoints for `GET /review/{id}`, `GET /similar/{id}`, and `GET /methodology`.
   - `src/dropbox/`: Complete Drop-your-data pipeline (loader, cleaning, regex PII redaction, TF-IDF sentiment scoring, centroid-based theme matcher, error models, and pipeline runner).
   - `src/cleaning.py`, `src/complaints.py`, `src/complaint_types.py`, `src/db.py`, `src/llm.py`, `src/sentiment.py`, `src/summaries.py`, `src/topics.py`: Data ingestion, database population, and modeling utilities.
 - **`app/`**:
-  - `app/dashboard.py`: Interactive Streamlit dashboard with 4 tabs: Overview, Theme Explorer, Search, and Drop your data.
-- **`tests/`**: Pytest test suite (36 passing tests):
+  - `app/dashboard.py`: Interactive Streamlit dashboard with 6 tabs: Overview, Theme Explorer, Search, Drop your data, Methodology, and Complaints (exploratory).
+- **`.streamlit/`**:
+  - `.streamlit/config.toml`: Light and dark theme configurations.
+- **`tests/`**: Pytest test suite (44 passing tests):
   - `tests/test_api.py`: 7 integration tests for core REST endpoints.
+  - `tests/test_explore_api.py`: 7 integration tests for explore REST endpoints.
   - `tests/test_dashboard.py`: 2 Streamlit `AppTest` test cases.
+  - `tests/test_dashboard_v12.py`: 1 Streamlit `AppTest` test case for v1.2 tabs and components.
   - `tests/test_dropbox_api.py`: 15 integration tests for `/dropbox` endpoints.
   - `tests/dropbox/test_dropbox.py`: 12 unit tests for the dropbox package.
 - **`scripts/`**:
   - `scripts/acceptance_dropbox.py`: Automated end-to-end acceptance test script covering cold-start, held-out accuracy, non-Amazon text, error handling, PII/formula guard, AppTest, and snapshot parity.
+  - `scripts/evaluation_upgrade.py`: Standalone evaluation upgrade script computing bootstrap CIs, McNemar tests, ECE/calibration, and slice analysis.
 - **`results/`**: Analytical outputs, documentation, and visual evidence:
   - `results/dropbox_notes.md`: Profiling timings, architectural constraints, acceptance check outputs, and snapshot lines.
+  - `results/evaluation_upgrade.md`: Comprehensive documentation of the evaluation upgrade.
+  - `results/evaluation_upgrade.csv`: Bootstrap 95% confidence intervals and paired differences.
+  - `results/mcnemar_tests.csv`: McNemar exact binomial tests on discordant pairs.
+  - `results/calibration.csv` & `calibration_summary.csv`: Reliability binning and Expected Calibration Error summary.
+  - `results/calibration.png`: Calibration reliability diagram.
+  - `results/slice_analysis.csv`: Length quartiles, confidence bands, and theme slice analysis.
   - `results/notes.md`: Detailed methodological documentation.
   - `results/verification_report.md`: Grounded summary citation audit and quality assessment.
   - `results/sentiment_comparison.csv` & `sentiment_comparison.png`: Baseline and fine-tuned sentiment evaluations.
   - `results/topic_comparison.csv`: LDA and BERTopic coherence metrics.
   - `results/complaint_by_theme.csv`, `complaint_by_theme_v2.csv`, `complaint_type_counts.csv`, `complaint_type_counts_v2.csv`, `complaint_topic_summary.csv`: Complaint taxonomy outputs.
-  - `results/screenshots/`: Full-page dashboard captures (`01_overview.png`, `02_theme_explorer.png`, `03_mixed_theme_warning.png`, `04_search_results.png`, `05_drop_your_data_empty.png`, `06_drop_your_data_results.png`).
+  - `results/screenshots/`: Full-page dashboard captures (`01_overview.png`, `02_theme_explorer.png`, `03_mixed_theme_warning.png`, `04_search_results.png`, `05_drop_your_data_empty.png`, `06_drop_your_data_results.png`, `07_overview_light.png`, `07_overview_dark.png`, `08_methodology.png`, `09_complaints.png`).
 - **`config/`**:
   - `config/complaint_types.json` and `config/complaint_types_v2.json`: Taxonomy definitions and prototype sentences.
 - **`notebooks/`**: Research and development notebooks (`01_explore.ipynb` through `10_complaint_types.ipynb`).
@@ -82,7 +94,7 @@ streamlit run app/dashboard.py
 ### (c) Running Tests
 
 ```bash
-# Run the full 36-test suite
+# Run the full 44-test suite
 pytest tests/ -v
 
 # Run the automated acceptance test script
@@ -120,9 +132,11 @@ To regenerate all processed data and model artifacts from scratch:
 | Component / Task | Automatic Checks | LLM Reviewer | Human (me) |
 |:---|:---|:---|:---|
 | **Sentiment Model Evaluation** | Accuracy, macro F1, confusion matrices on the held-out 10,000-review test split | Error sample inspections | Not done |
+| **Evaluation Upgrade** | 2,000 bootstrap resamples (95% CIs), McNemar exact discordant tests, ECE calculation, slice analysis | None | Not done |
 | **Grounded Summaries** | Citation parsing, word overlap validation (2 false alarms noted), 6 not checked | 18 claims reviewed (14 supported, 4 partly supported, 0 unsupported) | Not done |
 | **Theme Labels** | None | Gemini drafted initial labels; Claude suggested 22 adjustments, I approved them | Approval only |
 | **Topic Quality** | None | Spot-check of 5 thematic clusters | Not done |
 | **Complaint Taxonomy** | Cosine similarity ($\ge 0.30$) and margin ($\ge 0.03$) threshold enforcement | Inspection of ~10 sample reviews per complaint type | Not done |
-| **Core API Endpoints** | 7 automated tests in `tests/test_api.py` | None | Not done |
-| **Drop-Your-Data Feature** | 36 passing tests + `scripts/acceptance_dropbox.py` (held-out accuracy: 89.00% on 300 rows, 88.70% on 1,000 rows) | None | Not done |
+| **Core & Explore API Endpoints** | 14 automated tests in `tests/test_api.py` and `tests/test_explore_api.py` | None | Not done |
+| **Drop-Your-Data Feature** | 27 passing tests + `scripts/acceptance_dropbox.py` (held-out accuracy: 89.00% on 300 rows, 88.70% on 1,000 rows) | None | Not done |
+| **Dashboard UI** | 3 passing AppTest tests (`tests/test_dashboard.py`, `tests/test_dashboard_v12.py`) | None | Not done |
