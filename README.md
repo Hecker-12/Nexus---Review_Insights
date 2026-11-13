@@ -16,7 +16,7 @@ flowchart TD
     subgraph Sentiment Classification
         CLEAN --> VADER[VADER Rule Baseline]
         CLEAN --> TFIDF[TF-IDF + Logistic Regression]
-        CLEAN --> BERT_ZS[DistilBERT Zero-Shot]
+        CLEAN --> BERT_ZS[DistilBERT Off-the-Shelf SST-2]
         CLEAN --> BERT_FT[DistilBERT Fine-Tuned]
     end
 
@@ -34,8 +34,8 @@ flowchart TD
 
     subgraph Storage & Serving
         MERGED & BERT_FT & LLM_SUM --> SQLITE[(insights.db SQLite)]
-        EMB & SQLITE --> FASTAPI[FastAPI REST API: /sentiment, /themes, /summary, /search, /dropbox]
-        FASTAPI --> STREAMLIT[Streamlit Dashboard: Overview, Theme Explorer, Search, Drop your data]
+        EMB & SQLITE --> FASTAPI[FastAPI REST API: /sentiment, /themes, /summary, /search, /dropbox, /review, /similar, /methodology]
+        FASTAPI --> STREAMLIT[Streamlit Dashboard: 6 Tabs (Overview, Themes, Search, Drop data, Methodology, Complaints)]
     end
 ```
 
@@ -46,14 +46,14 @@ flowchart TD
 The engine analyzes **50,000 Amazon product reviews** with the following structural limitations:
 - **Binary Sentiment Only**: Reviews are categorized strictly as `positive` or `negative`. There is no neutral class to capture hedged or ambivalent reviews.
 - **No Dates (No Trends)**: The dataset contains no timestamp or date metadata. Longitudinal trend tracking, time-series aggregations, and temporal spike detection cannot be performed.
-- **Star-Derived Label Noise**: Ground truth labels derived from 1–5 star ratings introduce noise (e.g. sarcastic reviews with 5 stars or mildly critical reviews rated 1 star).
+- **Star-Derived Label Noise**: Ground truth labels derived from 1–5 star ratings introduce noise (e.g. sarcastic reviews with 5 stars or critical reviews rated 1 star).
 - **Mixed Products**: Reviews span diverse product categories (electronics, media, baby products, apparel, personal care) without category partition metadata, leading to composite clusters.
 
 ---
 
 ## 3. Results
 
-All metrics below are drawn directly from `results/sentiment_comparison.csv`, `results/topic_comparison.csv`, `results/notes.md`, and `results/verification_report.md`.
+All metrics below are drawn directly from `results/sentiment_comparison.csv`, `results/topic_comparison.csv`, `results/notes.md`, `results/evaluation_upgrade.csv`, `results/mcnemar_tests.csv`, `results/calibration_summary.csv`, and `results/slice_analysis.csv`.
 
 ### (a) Sentiment Classification (10,000 Test Reviews)
 
@@ -64,6 +64,8 @@ All metrics below are drawn directly from `results/sentiment_comparison.csv`, `r
 | **TF-IDF + LogReg** | 0.9017 | 0.9017 | 4,426 | 508 | 475 | 4,591 |
 | **DistilBERT zero-shot** | 0.8980 | 0.8980 | 4,506 | 428 | 592 | 4,474 |
 | **DistilBERT fine-tuned** | **0.9468** | **0.9468** | **4,661** | **273** | **259** | **4,807** |
+
+> **Note**: *"DistilBERT zero-shot" refers to an off-the-shelf SST-2 sentiment model, not trained on Amazon data.*
 
 ### (b) Topic Modeling & NPMI Coherence
 
@@ -87,6 +89,27 @@ All metrics below are drawn directly from `results/sentiment_comparison.csv`, `r
 | **Flagged claims (automatic checks)** | 2 | Word-overlap false alarms in Theme 14 and Theme 28 (passed automatic checks upon review) |
 | **Claims read by an LLM reviewer** | 18 | 14 supported, 4 partly supported, 0 unsupported |
 | **Overview summaries** | 29 | Uncited by design, reported separately from praise and complaint claims |
+
+### (d) Evaluation Upgrade (Bootstrap CIs, McNemar Tests, Calibration, and Slices)
+
+Statistical testing, calibration analysis, and slice evaluations were conducted on the held-out 10,000-review test split (`results/evaluation_upgrade.md`):
+
+#### 1. Bootstrap 95% Confidence Intervals & McNemar Exact Tests
+Paired bootstrap resampling (2,000 resamples, seeded random state 42) and exact two-sided binomial McNemar tests on discordant pairs yield:
+- **Fine-tuned minus TF-IDF**: **+0.0451** accuracy, 95% CI **0.0396 to 0.0506**, McNemar $b=652$, $c=201$, $p$ about $2.9\text{e-}56$.
+- **Off-the-shelf SST-2 model minus TF-IDF**: **-0.0037**, CI **-0.0102 to 0.0028**, $p = 0.288$: no detectable difference.
+- **Ensemble (fixed 0.5/0.5) 0.9474 vs fine-tuned 0.9468**, McNemar $p = 0.561$: no detectable gain.
+- *Decision rule*: The Methodology conclusions ("difference detected" or "no detectable difference") are generated in code from $p < 0.001$ and from whether the paired bootstrap CI excludes 0.
+
+#### 2. Expected Calibration Error (ECE) & Reliability
+Calibration against binary correctness was evaluated using 10 equal-width bins on $[0.5, 1.0]$:
+- **ECE**: fine-tuned **0.0295**, SST-2 model **0.0849**, TF-IDF **0.0943**.
+- **Fine-tuned accuracy by confidence**: below 0.70 ($n=238$) **0.5546**; 0.70 to 0.90 ($n=401$) **0.6708**; above 0.90 ($n=9,361$) **0.9686**. Band edges fixed in advance, descriptive only.
+
+#### 3. Slice Analysis
+- **Length quartiles**: TF-IDF 0.9180, 0.8995, 0.9053, 0.8838; fine-tuned 0.9471, 0.9446, 0.9472, 0.9483. Descriptive only (about 2,500 rows each).
+- **Theme slices**: Theme slices have 107 to 4,557 rows; five are marked small n; do not rank themes.
+- *Methodological bounds*: Intervals reflect test sampling only; models were trained once; one test set; the ensemble weights were not tuned.
 
 ---
 
@@ -170,7 +193,7 @@ Spot-checks conducted across merged themes revealed clear distinctions in topic 
 
 ## 8. Dashboard Screenshots
 
-The interactive dashboard consists of four tabs and contextual safety banners:
+The interactive dashboard consists of six tabs and contextual safety banners: Overview, Theme Explorer, Search, Drop your data, Methodology, and Complaints (exploratory).
 
 | Overview Tab | Theme Explorer Tab |
 |:---:|:---:|
@@ -186,6 +209,16 @@ The interactive dashboard consists of four tabs and contextual safety banners:
 |:---:|:---:|
 | ![Drop Your Data Empty](results/screenshots/05_drop_your_data_empty.png) | ![Drop Your Data Results](results/screenshots/06_drop_your_data_results.png) |
 | *Upload form, file size/row limits, and domain warnings* | *300-row held-out sample KPIs, ratings comparison, and theme chart* |
+
+| Overview Tab (Light Mode) | Overview Tab (Dark Mode) |
+|:---:|:---:|
+| ![Overview Light](results/screenshots/07_overview_light.png) | ![Overview Dark](results/screenshots/07_overview_dark.png) |
+| *Top of the tab: Key Insights card and sentiment distribution donut chart in light theme* | *Top of the tab: Key Insights card and sentiment distribution donut chart in dark theme* |
+
+| Methodology Tab | Complaints Tab (Exploratory) |
+|:---:|:---:|
+| ![Methodology Tab](results/screenshots/08_methodology.png) | ![Complaints Tab](results/screenshots/09_complaints.png) |
+| *Top of the tab: Model performance with 95% bootstrap CIs, paired differences, and McNemar tests* | *Top of the tab: Exploratory complaint taxonomy disclaimer and distribution bar chart* |
 
 ---
 
@@ -240,27 +273,60 @@ Detailed acceptance test logs and profiling are recorded in [`results/dropbox_no
 
 ---
 
-## 10. How to Run
+## 10. New Explore REST Endpoints & Analytical Tabs
+
+### (a) Explore REST Endpoints
+- `GET /review/{review_id}`: Retrieves single review details (`review_id`, `text`, `sentiment_true`, `theme_id`, `theme_label`) by non-negative integer ID directly from `insights.db` in read-only mode (`mode=ro`). Returns HTTP 404 for unknown review IDs, and HTTP 422 with structured JSON error details for negative or non-integer inputs without tracebacks.
+- `GET /similar/{review_id}?k=10`: Returns top-$k$ nearest topical neighbors ($1 \le k \le 20$, default $k=10$) using cosine similarity across precomputed unit-normalized embeddings via a memory-mapped numpy array under a concurrency lock. The query review itself is excluded from returned neighbors. Each neighbor includes `review_id`, similarity `score`, truncated `text` (300 characters), `sentiment_true`, and `theme_label`.
+  - *Topical note*: The "Reviews about the same subject" results are topical, not about sentiment (the query review for `/similar/0` was negative and its three nearest neighbours were positive).
+- `GET /methodology`: Serves structured JSON for whitelisted CSV files in `results/` (`sentiment_comparison.csv`, `topic_comparison.csv`, `evaluation_upgrade.csv`, `mcnemar_tests.csv`, `calibration.csv`, `calibration_summary.csv`, `slice_analysis.csv`, `complaint_type_counts_v2.csv`, `complaint_by_theme_v2.csv`), sanitizing `NaN` and `inf` values to standard JSON `null`.
+
+### (b) Methodology and Complaints Tabs
+- **Methodology Tab**: Presents statistical evaluation rigor on 10,000 held-out test reviews:
+  - Model performance table with 95% bootstrap confidence intervals (2,000 resamples).
+  - Paired accuracy difference table and McNemar exact discordant tests. Statistical conclusions ("difference detected" or "no detectable difference") are generated in code from $p < 0.001$ and from whether the paired bootstrap CI excludes 0.
+  - Interactive reliability diagram with Expected Calibration Error (ECE) summary table and fine-tuned accuracy by confidence band.
+  - Slice analysis table across review length quartiles, confidence bands, and product theme slices (with small-$n$ flags).
+  - Topic modeling comparison table and verbatim methodological limits.
+- **Complaints Tab (Exploratory)**: Explores failure modes across negative reviews using a predefined 11-category complaint taxonomy:
+  - Overall distribution bar chart of negative reviews by complaint type.
+  - Heat map of complaint type percentages across product themes having at least 100 negative reviews (20 product themes plus the Unclustered group).
+  - Full interactive complaint breakdown data table.
+
+---
+
+## 11. How to Run
 
 ### (a) Repository Structure
 
 ```
 review-insights/
+├── .streamlit/
+│   └── config.toml                   # Light and dark theme configurations
 ├── app/
-│   └── dashboard.py                  # Streamlit dashboard (4 tabs)
+│   └── dashboard.py                  # Streamlit dashboard (6 tabs)
 ├── config/
 │   ├── complaint_types.json          # Initial complaint prototypes
 │   └── complaint_types_v2.json       # 11 complaint types with prototype sentences
 ├── notebooks/                        # Numbered research notebooks (01 to 10)
 ├── results/                          # Evaluation metrics, reports, and screenshots
+│   ├── calibration.csv               # Calibration bins and running totals
+│   ├── calibration.png               # Reliability diagram
+│   ├── calibration_summary.csv       # Expected Calibration Error summary
 │   ├── dropbox_notes.md              # Acceptance checks and cold-start profiling
-│   └── screenshots/                  # Dashboard PNG captures (01 to 06)
+│   ├── evaluation_upgrade.csv        # Bootstrap 95% CIs and paired differences
+│   ├── evaluation_upgrade.md         # Comprehensive evaluation upgrade documentation
+│   ├── mcnemar_tests.csv             # McNemar exact tests on discordant pairs
+│   ├── slice_analysis.csv            # Length, confidence, and theme slice analysis
+│   └── screenshots/                  # Dashboard PNG captures (01 to 09)
 ├── scripts/
-│   └── acceptance_dropbox.py         # Automated end-to-end acceptance test script
+│   ├── acceptance_dropbox.py         # Automated end-to-end acceptance test script
+│   └── evaluation_upgrade.py         # Evaluation upgrade generation script
 ├── src/
 │   ├── api/
 │   │   ├── main.py                   # FastAPI REST backend
-│   │   └── dropbox_router.py         # Endpoints: GET /dropbox/limits, POST /dropbox/analyze
+│   │   ├── dropbox_router.py         # Endpoints: GET /dropbox/limits, POST /dropbox/analyze
+│   │   └── explore_router.py         # Endpoints: /review/{id}, /similar/{id}, /methodology
 │   ├── dropbox/                      # Core Drop-your-data processing pipeline
 │   │   ├── cleaning.py               # Text cleaning and deduplication
 │   │   ├── errors.py                 # Structured exception classes
@@ -277,13 +343,15 @@ review-insights/
 │   ├── sentiment.py                  # Sentiment metrics computation
 │   ├── summaries.py                  # Grounded summary generation & checks
 │   └── topics.py                     # Topic modeling and coherence utilities
-└── tests/                            # Pytest test suite (36 tests)
+└── tests/                            # Pytest test suite (44 tests)
     ├── conftest.py                   # Test configuration
-    ├── test_api.py                   # Tests for core API endpoints
-    ├── test_dashboard.py             # Streamlit AppTest suite
-    ├── test_dropbox_api.py           # Integration tests for /dropbox endpoints
+    ├── test_api.py                   # Tests for core API endpoints (7 tests)
+    ├── test_dashboard.py             # Streamlit AppTest suite (2 tests)
+    ├── test_dashboard_v12.py         # Streamlit AppTest for v1.2 components (1 test)
+    ├── test_dropbox_api.py           # Integration tests for /dropbox endpoints (15 tests)
+    ├── test_explore_api.py           # Integration tests for explore endpoints (7 tests)
     └── dropbox/
-        └── test_dropbox.py           # Unit tests for dropbox package
+        └── test_dropbox.py           # Unit tests for dropbox package (12 tests)
 ```
 
 ### (b) Local Environment Setup
@@ -329,11 +397,13 @@ uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --reload
 streamlit run app/dashboard.py
 ```
 
-Access the dashboard at `http://localhost:8501` and interactive Swagger docs at `http://localhost:8000/docs`. The dashboard includes four tabs:
-1. **Overview**: Overall KPIs, % negative bar chart, full theme table.
-2. **Theme Explorer**: Deep dive into individual themes with praises, complaints, and cited review IDs.
-3. **Search**: Semantic vector search across all 50,000 reviews using cosine similarity.
+Access the dashboard at `http://localhost:8501` and interactive Swagger docs at `http://localhost:8000/docs`. The dashboard includes six tabs:
+1. **Overview**: Overall KPIs, key insights card, sentiment distribution donut chart, % negative bar chart, and full theme table.
+2. **Theme Explorer**: Deep dive into individual themes with praises, complaints, cited review IDs, and cited review viewer (`/review/{id}`).
+3. **Search**: Semantic vector search across all 50,000 reviews using cosine similarity, with topical nearest neighbors (`/similar/{id}`).
 4. **Drop your data**: Upload CSV or Excel files for in-memory scoring, theme matching, and CSV export.
+5. **Methodology**: Statistical evaluation rigor, bootstrap 95% CIs, McNemar exact tests, calibration curves, slice analysis, and methodological limits.
+6. **Complaints (exploratory)**: Complaint taxonomy frequencies, theme heat map ($\ge 100$ negative reviews), and full breakdown table.
 
 ### (e) Running with Docker Compose
 
@@ -344,7 +414,7 @@ docker compose up
 
 ---
 
-## 11. Limitations & Future Roadmap
+## 12. Limitations & Future Roadmap
 
 ### Known Limitations
 1. **Binary Classification**: Neutral or mixed customer sentiment is forced into binary buckets (`positive` / `negative`).
@@ -359,25 +429,27 @@ docker compose up
 - **Complaint Summaries**: Generating grounded, citation-backed summaries specifically for each complaint category.
 - **Topics on Negative Reviews with a Better Method**: Exploring hierarchical clustering with adaptive density estimation or contrastive clustering to extract granular failure modes from negative reviews without product-category entanglement.
 - **Dated Dataset for Trends**: Augmenting with timestamped e-commerce review streams to detect defect spikes and emerging failure trends over time.
-- **Human Labeling of Summaries**: Conducting human review of generated claims and praise/complaint summaries alongside automated checks.
+- **Human Review of Summaries**: Conducting human review of generated claims and praise/complaint summaries alongside automated checks.
 
 ---
 
-## 12. Quality Control: Who Checked What
+## 13. Quality Control: Who Checked What
 
 | Component / Task | Automatic Checks | LLM Reviewer | Human (me) |
 |:---|:---|:---|:---|
 | **Sentiment Model Evaluation** | Accuracy, macro F1, confusion matrices on the held-out 10,000-review test set | Error samples | Not done |
+| **Evaluation Upgrade** | 2,000 bootstrap resamples (95% CIs), McNemar exact discordant tests, ECE calculation, slice analysis | None | Not done |
 | **Grounded Summaries** | Citation parsing (1 out-of-sample ID dropped), word overlap (2 flagged, both false alarms), 6 not checked | 18 claims (14 supported, 4 partly, 0 unsupported) | Not done |
 | **Theme Labels** | None | Gemini drafted labels, Claude suggested corrections (22 of 29 changed, about 10 fixing real errors), I approved them | Approval only |
 | **Topic Quality** | None | Spot-check of 5 themes | Not done |
 | **Complaint Taxonomy** | Thresholds | About 10 reviews per type | Not done |
-| **API Endpoints** | 7 passing tests (tests/test_api.py) | None | Not done |
-| **Drop box** | 36 passing tests (unit & integration) + acceptance script (held-out accuracy: 89.00% on 300 rows, 88.70% on 1,000 rows) | None | Not done |
+| **API Endpoints** | 14 passing tests (`tests/test_api.py` and `tests/test_explore_api.py`) | None | Not done |
+| **Drop box** | 27 passing tests (unit & integration) + acceptance script (held-out accuracy: 89.00% on 300 rows, 88.70% on 1,000 rows) | None | Not done |
+| **Dashboard UI** | 3 passing AppTest tests (`tests/test_dashboard.py`, `tests/test_dashboard_v12.py`) | None | Not done |
 
 ---
 
-## 13. Methods & Transparency Note
+## 14. Methods & Transparency Note
 
 - **LLM Used**: Grounded summaries were generated using a Gemini Flash-Lite model (exact version not recorded; current setting: gemini-2.5-flash-lite), temperature 0.0, and stratified sample prompts.
 - **LLM Reviewer**: Claim, error-analysis, label and topic reviews marked 'LLM reviewer' were done by Claude (Anthropic) in a chat session, from excerpts I pasted. They were not done by a human and not by automated Gemini prompts.

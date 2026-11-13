@@ -1,0 +1,4 @@
+model,ece
+TF-IDF+LogReg,0.0943
+DistilBERT zero-shot,0.0849
+DistilBERT fine-tuned,0.0295

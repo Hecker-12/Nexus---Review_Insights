@@ -65,6 +65,41 @@ def fetch_search(query: str) -> list[dict]:
     return api_get("/search", params={"q": query}).json()
 
 
+@st.cache_data(ttl=300, show_spinner="Fetching methodology data…")
+def fetch_methodology() -> dict:
+    return api_get("/methodology").json()
+
+
+@st.cache_data(ttl=300, show_spinner="Fetching review…")
+def fetch_review(review_id: int) -> dict | None:
+    try:
+        resp = requests.get(f"{API_BASE_URL}/review/{review_id}", timeout=10)
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return resp.json()
+    except requests.ConnectionError:
+        st.error(f"⚠️ Cannot reach the API at `{API_BASE_URL}`.")
+        st.stop()
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=300, show_spinner="Fetching similar reviews…")
+def fetch_similar(review_id: int, k: int = 5) -> list[dict]:
+    try:
+        resp = requests.get(f"{API_BASE_URL}/similar/{review_id}", params={"k": k}, timeout=10)
+        if resp.status_code == 404:
+            return []
+        resp.raise_for_status()
+        return resp.json()
+    except requests.ConnectionError:
+        st.error(f"⚠️ Cannot reach the API at `{API_BASE_URL}`.")
+        st.stop()
+    except Exception:
+        return []
+
+
 # ---------------------------------------------------------------------------
 # Page config
 # ---------------------------------------------------------------------------
@@ -108,11 +143,13 @@ st.markdown("""
 st.title("📊 Review Insights Dashboard")
 st.caption("Powered by FastAPI · 50,000 Amazon reviews · 29 themes + Unclustered")
 
-tab_overview, tab_explorer, tab_search, tab_dropbox = st.tabs([
+tab_overview, tab_explorer, tab_search, tab_dropbox, tab_methodology, tab_complaints = st.tabs([
     "📈 Overview",
     "🔍 Theme Explorer",
     "🔎 Search",
     "Drop your data",
+    "Methodology",
+    "Complaints (exploratory)",
 ])
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -122,6 +159,48 @@ tab_overview, tab_explorer, tab_search, tab_dropbox = st.tabs([
 with tab_overview:
     sentiment_data = fetch_sentiment()
     overall = sentiment_data["overall"]
+    themes_data = sentiment_data.get("themes", [])
+
+    # Key insights card computed from /sentiment data
+    themes_ge_100 = [t for t in themes_data if t["topic_id"] != -1 and t["count"] >= 100]
+    top3_neg = sorted(themes_ge_100, key=lambda t: t["pct_negative"], reverse=True)[:3]
+    unclustered_t = next((t for t in themes_data if t["topic_id"] == -1), {"count": 22623})
+    unclustered_share = round((unclustered_t["count"] / overall["total_reviews"]) * 100.0, 1) if overall["total_reviews"] > 0 else 45.2
+
+    with st.container():
+        st.subheader("💡 Key Insights")
+        ki_col1, ki_col2 = st.columns([3, 2])
+        with ki_col1:
+            st.markdown(
+                f"- **Overall Negative Sentiment**: **{overall['pct_negative']}%** of the {overall['total_reviews']:,} customer reviews are negative.\n"
+                f"- **Unclustered Reviews**: **{unclustered_share}%** of reviews do not cluster into any specific product theme.\n"
+                f"- **Top 3 Most Negative Themes (≥ 100 reviews)**:\n"
+                f"  1. **{top3_neg[0]['label']}**: {top3_neg[0]['pct_negative']}% negative ({top3_neg[0]['count']:,} reviews)\n"
+                f"  2. **{top3_neg[1]['label']}**: {top3_neg[1]['pct_negative']}% negative ({top3_neg[1]['count']:,} reviews)\n"
+                f"  3. **{top3_neg[2]['label']}**: {top3_neg[2]['pct_negative']}% negative ({top3_neg[2]['count']:,} reviews)"
+            )
+        with ki_col2:
+            donut_df = pd.DataFrame({
+                "Sentiment": ["Positive", "Negative"],
+                "Count": [overall["positive_count"], overall["negative_count"]],
+            })
+            donut_chart = (
+                alt.Chart(donut_df)
+                .mark_arc(innerRadius=45, outerRadius=80)
+                .encode(
+                    theta=alt.Theta("Count:Q"),
+                    color=alt.Color(
+                        "Sentiment:N",
+                        scale=alt.Scale(domain=["Positive", "Negative"], range=["#22c55e", "#ef4444"]),
+                        legend=alt.Legend(title="Sentiment", orient="right"),
+                    ),
+                    tooltip=[alt.Tooltip("Sentiment:N"), alt.Tooltip("Count:Q", format=",d")],
+                )
+                .properties(width=190, height=190)
+            )
+            st.altair_chart(donut_chart, width="content")
+
+    st.divider()
 
     # Key metrics row
     col1, col2, col3, col4 = st.columns(4)
@@ -274,6 +353,37 @@ with tab_explorer:
                     st.markdown(f"**{i+1}.** {text}")
                     st.caption(f"Cited reviews: {id_str}")
 
+            # Open a cited review
+            all_cited_ids = []
+            for p in praises:
+                if isinstance(p, dict):
+                    all_cited_ids.extend(p.get("review_ids", []))
+            for c in complaints:
+                if isinstance(c, dict):
+                    all_cited_ids.extend(c.get("review_ids", []))
+            for cl in summary_data.get("claims", []):
+                if isinstance(cl, dict):
+                    all_cited_ids.extend(cl.get("review_ids", []))
+
+            unique_cited_ids = sorted({int(rid) for rid in all_cited_ids if str(rid).isdigit()})
+            if unique_cited_ids:
+                st.divider()
+                st.subheader("📖 Open a cited review")
+                chosen_rid = st.selectbox(
+                    "Open a cited review",
+                    options=unique_cited_ids,
+                    key=f"cited_review_{selected_id}",
+                )
+                if chosen_rid is not None:
+                    r_info = fetch_review(chosen_rid)
+                    if r_info:
+                        s_emoji = "🟢" if r_info["sentiment_true"] == "positive" else "🔴"
+                        st.markdown(
+                            f"**Review `{r_info['review_id']}`** &nbsp;·&nbsp; {s_emoji} "
+                            f"**{r_info['sentiment_true'].capitalize()}** &nbsp;·&nbsp; Theme: **{r_info['theme_label']}**"
+                        )
+                        st.info(r_info["text"])
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # TAB 3: Search
@@ -311,6 +421,30 @@ with tab_search:
                     )
                     st.markdown(f"> {r['text']}")
                     st.divider()
+
+            # Reviews about the same subject
+            result_ids = [r["review_id"] for r in results]
+            if result_ids:
+                st.subheader("🎯 Reviews about the same subject")
+                st.caption("Similarity is topical, not about sentiment.")
+                chosen_sim_id = st.selectbox(
+                    "Find reviews similar to",
+                    options=result_ids,
+                    key="search_sim_select",
+                )
+                if chosen_sim_id is not None:
+                    sim_items = fetch_similar(chosen_sim_id, k=5)
+                    if sim_items:
+                        for s_idx, s_item in enumerate(sim_items):
+                            s_emoji = "🟢" if s_item["sentiment_true"] == "positive" else "🔴"
+                            with st.container():
+                                st.markdown(
+                                    f"**#{s_idx+1}** &nbsp; {s_emoji} &nbsp; Review `{s_item['review_id']}` &nbsp;·&nbsp; "
+                                    f"**{s_item['theme_label']}** &nbsp;·&nbsp; Sentiment: **{s_item['sentiment_true'].capitalize()}** &nbsp;·&nbsp; "
+                                    f"Score: `{s_item['score']:.4f}`"
+                                )
+                                st.markdown(f"> {s_item['text']}")
+                                st.divider()
     elif query is not None and query.strip() == "":
         # User cleared the input — do nothing
         pass
@@ -548,4 +682,310 @@ with tab_dropbox:
                 mime="text/csv",
                 key="dropbox_download_csv_btn",
             )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TAB 5: Methodology
+# ═══════════════════════════════════════════════════════════════════════════
+
+with tab_methodology:
+    st.subheader("🔬 Methodology & Evaluation Rigor")
+    st.caption("Comprehensive statistical evaluation on 10,000 held-out test reviews from `test.parquet`.")
+
+    meth_data = fetch_methodology()
+
+    # 1. Model Performance with 95% Bootstrap CIs
+    st.markdown("### 📊 Model Performance (95% Bootstrap CIs, 2,000 resamples)")
+    st.caption("Zero-shot = off-the-shelf SST-2 sentiment model, not trained on Amazon data.")
+    eval_table = meth_data.get("evaluation_upgrade.csv")
+    if eval_table:
+        df_eval = pd.DataFrame(eval_table["rows"], columns=eval_table["columns"])
+        models_order = [
+            "VADER default",
+            "VADER tuned (0.7)",
+            "TF-IDF+LogReg",
+            "DistilBERT zero-shot",
+            "DistilBERT fine-tuned",
+            "Ensemble (TF-IDF + FT)",
+        ]
+
+        summary_rows = []
+        for m in models_order:
+            m_rows = df_eval[df_eval["model"] == m]
+            if not m_rows.empty:
+                acc_row = m_rows[m_rows["metric"] == "accuracy"]
+                f1_row = m_rows[m_rows["metric"] == "macro_f1"]
+                acc_val = acc_row["value"].values[0] if not acc_row.empty else 0.0
+                acc_l = acc_row["ci_low"].values[0] if not acc_row.empty else 0.0
+                acc_h = acc_row["ci_high"].values[0] if not acc_row.empty else 0.0
+
+                f1_val = f1_row["value"].values[0] if not f1_row.empty else 0.0
+                f1_l = f1_row["ci_low"].values[0] if not f1_row.empty else 0.0
+                f1_h = f1_row["ci_high"].values[0] if not f1_row.empty else 0.0
+
+                summary_rows.append({
+                    "Model": m,
+                    "Accuracy (95% CI)": f"{acc_val:.4f} ({acc_l:.4f} to {acc_h:.4f})",
+                    "Macro F1 (95% CI)": f"{f1_val:.4f} ({f1_l:.4f} to {f1_h:.4f})",
+                })
+
+        st.dataframe(pd.DataFrame(summary_rows), width="stretch", hide_index=True)
+
+        # Paired differences
+        st.markdown("#### Paired Accuracy Differences (95% Bootstrap CI)")
+        diff_rows = df_eval[df_eval["metric"] == "accuracy_diff"]
+        if not diff_rows.empty:
+            diff_disp = []
+            for _, r in diff_rows.iterrows():
+                ci_l = float(r["ci_low"])
+                ci_h = float(r["ci_high"])
+                diff_val = float(r["value"])
+                excludes_zero = (ci_l > 0 and ci_h > 0) or (ci_l < 0 and ci_h < 0)
+                conclusion = "Difference detected (95% CI excludes 0)" if excludes_zero else "No detectable difference (95% CI includes 0)"
+                diff_disp.append({
+                    "Comparison": r["model"],
+                    "Accuracy Difference": f"{diff_val:+.4f} ({ci_l:.4f} to {ci_h:.4f})",
+                    "Statistical Conclusion": conclusion,
+                })
+            st.dataframe(pd.DataFrame(diff_disp), width="stretch", hide_index=True)
+    else:
+        st.info("not available in this deployment")
+
+    st.divider()
+
+    # 2. McNemar Exact Discordant Tests
+    st.markdown("### ⚖️ McNemar Exact Tests (Discordant Pairs)")
+    mcnemar_table = meth_data.get("mcnemar_tests.csv")
+    if mcnemar_table:
+        df_mcn = pd.DataFrame(mcnemar_table["rows"], columns=mcnemar_table["columns"])
+        df_mcn_disp = []
+        for _, r in df_mcn.iterrows():
+            p_val = float(r["p_value"])
+            conclusion = "Difference detected (p < 0.001)" if p_val < 0.001 else "No detectable difference (p >= 0.001)"
+            df_mcn_disp.append({
+                "Comparison": r["comparison"],
+                "Model 1 Right, Model 2 Wrong (b)": int(r["b"]),
+                "Model 1 Wrong, Model 2 Right (c)": int(r["c"]),
+                "Total Discordant (b + c)": int(r["total_discordant"]),
+                "Two-Sided p-value": f"{p_val:.6e}",
+                "Conclusion": conclusion,
+            })
+        st.dataframe(pd.DataFrame(df_mcn_disp), width="stretch", hide_index=True)
+    else:
+        st.info("not available in this deployment")
+
+    st.divider()
+
+    # 3. Confidence Calibration & ECE
+    st.markdown("### 🎯 Confidence Calibration & Expected Calibration Error")
+    calib_table = meth_data.get("calibration.csv")
+    calib_summary_table = meth_data.get("calibration_summary.csv")
+
+    if calib_table:
+        df_calib = pd.DataFrame(calib_table["rows"], columns=calib_table["columns"])
+        c_col1, c_col2 = st.columns([3, 2])
+
+        with c_col1:
+            valid_calib = df_calib.dropna(subset=["accuracy"])
+            lines_chart = (
+                alt.Chart(valid_calib)
+                .mark_line(point=True)
+                .encode(
+                    x=alt.X("mean_confidence:Q", title="Mean Predicted Confidence", scale=alt.Scale(domain=[0.48, 1.0])),
+                    y=alt.Y("accuracy:Q", title="Empirical Accuracy", scale=alt.Scale(domain=[0.4, 1.02])),
+                    color=alt.Color("model:N", title="Model"),
+                    tooltip=["model:N", "bin_index:Q", alt.Tooltip("mean_confidence:Q", format=".4f"), alt.Tooltip("accuracy:Q", format=".4f"), "count:Q"],
+                )
+            )
+
+            diag_data = pd.DataFrame({"x": [0.5, 1.0], "y": [0.5, 1.0]})
+            diag_chart = (
+                alt.Chart(diag_data)
+                .mark_line(strokeDash=[4, 4], color="#64748b")
+                .encode(x="x:Q", y="y:Q")
+            )
+
+            chart_calib = (lines_chart + diag_chart).properties(title="Reliability Diagram", height=320)
+            st.altair_chart(chart_calib, width="stretch")
+
+        with c_col2:
+            st.markdown("#### ECE Summary")
+            if calib_summary_table:
+                df_cs = pd.DataFrame(calib_summary_table["rows"], columns=calib_summary_table["columns"])
+                df_cs_disp = df_cs.copy()
+                df_cs_disp.columns = ["Model", "ECE"]
+                df_cs_disp["ECE"] = df_cs_disp["ECE"].apply(lambda v: f"{v:.4f}")
+                st.dataframe(df_cs_disp, width="stretch", hide_index=True)
+
+            st.markdown("#### Fine-Tuned Accuracy by Confidence Band")
+            slice_table_for_conf = meth_data.get("slice_analysis.csv")
+            if slice_table_for_conf:
+                df_sl_raw = pd.DataFrame(slice_table_for_conf["rows"], columns=slice_table_for_conf["columns"])
+                ft_bands = df_sl_raw[df_sl_raw["slice_category"] == "Fine-Tuned Confidence Bands"]
+                if not ft_bands.empty:
+                    ft_bands_disp = ft_bands[["slice_name", "n", "acc_fine_tuned"]].copy()
+                    ft_bands_disp.columns = ["Band", "Reviews (n)", "Accuracy"]
+                    ft_bands_disp["Accuracy"] = ft_bands_disp["Accuracy"].apply(lambda a: f"{a:.4f}")
+                    st.dataframe(ft_bands_disp, width="stretch", hide_index=True)
+                    st.caption(
+                        "Excluding the 639 reviews with fine-tuned confidence below 0.90, accuracy on the remaining 9,361 reviews is 0.9686. "
+                        "The band edges were fixed in advance; this is descriptive and not a tuned threshold."
+                    )
+    else:
+        st.info("not available in this deployment")
+
+    st.divider()
+
+    # 4. Slice Analysis Table
+    st.markdown("### 🍰 Slice Analysis")
+    slice_table = meth_data.get("slice_analysis.csv")
+    if slice_table:
+        df_slice = pd.DataFrame(slice_table["rows"], columns=slice_table["columns"])
+        df_slice_disp = df_slice.copy()
+        df_slice_disp["small_n"] = df_slice_disp["small_n"].apply(lambda s: "⚠️ Small n (<200)" if s else "No")
+        df_slice_disp["acc_tfidf"] = df_slice_disp["acc_tfidf"].apply(lambda x: f"{x:.4f}")
+        df_slice_disp["acc_zero_shot"] = df_slice_disp["acc_zero_shot"].apply(lambda x: f"{x:.4f}")
+        df_slice_disp["acc_fine_tuned"] = df_slice_disp["acc_fine_tuned"].apply(lambda x: f"{x:.4f}")
+        df_slice_disp.columns = ["Category", "Slice", "n", "Small n Flag", "TF-IDF Acc", "Zero-Shot Acc", "Fine-Tuned Acc"]
+        st.dataframe(df_slice_disp, width="stretch", hide_index=True)
+    else:
+        st.info("not available in this deployment")
+
+    st.divider()
+
+    # 5. Topic Modeling Comparison Table
+    st.markdown("### 🗂️ Topic Modeling Comparison")
+    topic_table = meth_data.get("topic_comparison.csv")
+    if topic_table:
+        df_topic = pd.DataFrame(topic_table["rows"], columns=topic_table["columns"])
+        st.dataframe(df_topic, width="stretch", hide_index=True)
+        st.caption("📌 **Note**: BERTopic NPMI excludes the outlier group.")
+    else:
+        st.info("not available in this deployment")
+
+    st.divider()
+
+    # 6. Methodological Limits (Verbatim from results/evaluation_upgrade.md)
+    st.markdown("### ⚠️ Methodological Limits")
+    st.caption("*(Embedded verbatim from `results/evaluation_upgrade.md` Section 5)*")
+    st.markdown(
+        "- **Sampling variability**: Confidence intervals reflect test set sampling variability only and do not account for data collection bias or annotation shifts.\n"
+        "- **Training randomness**: each model was trained once, so the intervals do not include variation from retraining.\n"
+        "- **Confidence calibration**: Calibration is evaluated against binary correctness using the maximum predicted class probability.\n"
+        "- **Sample size in slices**: Several slices have sample size below 200 reviews (`small_n = True`), increasing variance in slice-level estimates.\n"
+        "- **Untuned ensemble**: The ensemble model combines TF-IDF and fine-tuned transformer probabilities using fixed equal weights (0.5 / 0.5) without parameter tuning.\n"
+        "- **Single test set**: All evaluations are conducted on a single held-out 10,000-review test split."
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TAB 6: Complaints (exploratory)
+# ═══════════════════════════════════════════════════════════════════════════
+
+with tab_complaints:
+    st.subheader("⚠️ Complaint Taxonomy Analysis")
+    st.info(
+        "ℹ️ **Exploratory**: a predefined taxonomy matched by similarity; shares are lower bounds because "
+        "about 48% of negative reviews remain unmatched; one type is unreliable."
+    )
+
+    meth_data = fetch_methodology()
+    sentiment_info = fetch_sentiment()
+    themes_info = sentiment_info.get("themes", [])
+
+    # 1. Bar Chart of Complaint Types
+    counts_table = meth_data.get("complaint_type_counts_v2.csv")
+    if counts_table:
+        st.markdown("### 📊 Overall Distribution by Complaint Type")
+        df_counts = pd.DataFrame(counts_table["rows"], columns=counts_table["columns"])
+        df_counts["complaint_type"] = df_counts["complaint_type"].replace({"Too loud or noisy": "Too loud or noisy (unreliable)"})
+
+        bar_chart = (
+            alt.Chart(df_counts)
+            .mark_bar(cornerRadiusTopRight=4, cornerRadiusBottomRight=4)
+            .encode(
+                x=alt.X("count:Q", title="Number of Negative Reviews"),
+                y=alt.Y("complaint_type:N", title=None, sort="-x"),
+                tooltip=[
+                    alt.Tooltip("complaint_type:N", title="Complaint Type"),
+                    alt.Tooltip("count:Q", title="Reviews", format=",d"),
+                    alt.Tooltip("share:N", title="Share"),
+                ],
+                color=alt.condition(
+                    alt.datum.complaint_type == "Other / unclear",
+                    alt.value("#64748b"),
+                    alt.value("#f97316"),
+                ),
+            )
+            .properties(height=max(len(df_counts) * 26, 260))
+        )
+        st.altair_chart(bar_chart, width="stretch")
+    else:
+        st.info("Complaint counts table not available in this deployment.")
+
+    st.divider()
+
+    # 2. Heatmap: Complaint Type by Product Theme (themes with >= 100 negative reviews)
+    st.markdown("### 🔥 Complaint Type by Product Theme (≥ 100 Negative Reviews)")
+    theme_table = meth_data.get("complaint_by_theme_v2.csv")
+
+    if theme_table:
+        df_th_complaints = pd.DataFrame(theme_table["rows"], columns=theme_table["columns"])
+
+        # Filter to themes with negative_count >= 100 from /sentiment
+        qualifying_labels = {t["label"] for t in themes_info if t.get("negative_count", 0) >= 100}
+        df_th_filtered = df_th_complaints[df_th_complaints["product_theme"].isin(qualifying_labels)].copy()
+
+        if "Too loud or noisy" in df_th_filtered.columns:
+            df_th_filtered = df_th_filtered.rename(columns={"Too loud or noisy": "Too loud or noisy (unreliable)"})
+
+        n_named_themes = len([t for t in df_th_filtered["product_theme"] if t != "Unclustered"])
+        has_unclustered = "Unclustered" in df_th_filtered["product_theme"].values
+        theme_desc = f"{n_named_themes} product themes plus the Unclustered group" if has_unclustered else f"{len(df_th_filtered)} product themes"
+        st.caption(
+            f"Displaying {theme_desc}, each with at least 100 negative reviews. "
+            "'Other / unclear' is excluded from heatmap colors to highlight specific complaint variations."
+        )
+
+        value_cols = [c for c in df_th_filtered.columns if c not in ["product_theme", "Other / unclear"]]
+        df_melted = df_th_filtered.melt(
+            id_vars=["product_theme"],
+            value_vars=value_cols,
+            var_name="complaint_type",
+            value_name="percentage",
+        )
+
+        heatmap_chart = (
+            alt.Chart(df_melted)
+            .mark_rect()
+            .encode(
+                x=alt.X("complaint_type:N", title="Complaint Type"),
+                y=alt.Y("product_theme:N", title="Product Theme", sort="y"),
+                color=alt.Color("percentage:Q", title="% of Negatives", scale=alt.Scale(scheme="reds")),
+                tooltip=[
+                    alt.Tooltip("product_theme:N", title="Theme"),
+                    alt.Tooltip("complaint_type:N", title="Complaint"),
+                    alt.Tooltip("percentage:Q", title="Percentage", format=".2f"),
+                ],
+            )
+            .properties(height=max(len(df_th_filtered) * 22, 400))
+        )
+        st.altair_chart(heatmap_chart, width="stretch")
+
+        with st.expander("📋 View full theme complaint breakdown table"):
+            st.dataframe(df_th_filtered, width="stretch", hide_index=True)
+    else:
+        st.info("Theme complaint breakdown table not available in this deployment.")
+
+
+# ---------------------------------------------------------------------------
+# Footer
+# ---------------------------------------------------------------------------
+st.divider()
+st.caption(
+    "**Models used:** VADER (rule-based), TF-IDF + Logistic Regression, DistilBERT (zero-shot & fine-tuned), "
+    "all-MiniLM-L6-v2 (embeddings), BERTopic (topic discovery) · "
+    "⚠️ **Domain warning:** Models were trained on Amazon product reviews; accuracy on other text may be lower · "
+    "🔍 Reviews of claims and topics were done by an LLM reviewer, not a human."
+)
 
